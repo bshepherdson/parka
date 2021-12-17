@@ -5,10 +5,10 @@
     [parka.streams :as s]))
 
 (defn- test-parse [p input]
-  (sut/parse-str (sut/grammar {:start p}) "<test>" input))
+  (sut/parse-str p "<test>" input))
 
 (defn- test-partial [p input]
-  (select-keys (sut/parse p (s/stream "<test>" input) {})
+  (select-keys (sut/parse p (s/stream "<test>" input))
                [:pos :value]))
 
 (defn- test-fail [p input]
@@ -59,8 +59,7 @@
     (is (thrown-with-msg? Exception #"expected literal 'b'"
                           (test-parse p "ayC")))
     (is (thrown-with-msg? Exception #"expected literal 'C'"
-                          (test-parse p "abZ")))
-    ))
+                          (test-parse p "abZ")))))
 
 (deftest test-pseq-at
   (let [mkp #(sut/pseq-at % (sut/lit "a") (sut/lit "b") (sut/lit-ic "C"))]
@@ -94,8 +93,7 @@
     (is (thrown-with-msg? Exception #"unexpected EOF"
                           (test-parse p "")))
     (is (thrown-with-msg? Exception #"expected one of: abc"
-                          (test-parse p "d")))
-    ))
+                          (test-parse p "d")))))
 
 (deftest test-none-of
   (let [p (sut/none-of "abc")]
@@ -126,11 +124,9 @@
                              (sut/span \a \z)))]
     (is (= [\a \b "_" \c] (test-parse p "ab_c")))
     (is (= {:value [] :pos 0}
-           (select-keys (sut/parse p (s/stream "<test>" "X") {})
-                        [:value :pos])))
+           (test-partial p "X")))
     (is (= {:value [\a \b "_" \c] :pos 4}
-           (select-keys (sut/parse p (s/stream "<test>" "ab_cX") {})
-                        [:value :pos])))))
+           (test-partial p "ab_cX")))))
 
 (deftest test-many-min
   (let [p (sut/many-min 3 (sut/alt (sut/lit "_")
@@ -145,8 +141,7 @@
          (test-parse (sut/pseq
                        (sut/lit "a")
                        (sut/many-drop (sut/one-of " \t\r\n"))
-                       (sut/lit "b")
-                       )
+                       (sut/lit "b"))
                      "a   \t\t  \n\t\t  b"))))
 
 (deftest test-sep-by
@@ -158,8 +153,7 @@
     (is (= {:pos 3 :value ["a" "a"]}
            (test-partial p "abab")))
     (is (= {:pos 0 :value []}
-           (test-partial p "bb")))
-    ))
+           (test-partial p "bb")))))
 
 (deftest test-sep-by1
   (let [p (sut/sep-by1 (sut/lit "a") (sut/lit "b"))]

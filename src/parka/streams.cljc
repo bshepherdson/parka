@@ -8,7 +8,8 @@
   | `:filename` | Source file name |
   | `:line` | Current line number (1-based) |
   | `:col` | Current column number (0-based) |
-  | `:value` | Arbitrary parsing result (optional) |"
+  | `:value` | Arbitrary parsing result (optional) |
+  | `:state` | Arbitrary user state (optional) |"
   (:require
     [parka.errors :as errs]))
 
@@ -44,13 +45,15 @@
 
 (defn stream
   "Creates a new stream for the given `filename`, aimed at the start of the
-  string `s`."
-  [filename s]
-  {:str s
-   :pos 0
-   :filename filename
-   :line 1
-   :col 0})
+  string `input`. An optional user state can be provided."
+  ([filename input] (stream filename input {}))
+  ([filename input state]
+   {:str input
+    :pos 0
+    :filename filename
+    :line 1
+    :col 0
+    :state state}))
 
 ;(defn char-seq
 ;  "Returns a lazy seq of the head characters of successive tail streams."

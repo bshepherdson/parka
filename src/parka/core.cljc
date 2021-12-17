@@ -22,18 +22,18 @@
 (defn location [s]
   (select-keys s [:filename :line :col]))
 
-(defmulti parse (fn [p _ _]
+(defmulti parse (fn [p _]
                   (cond
                     (map? p)     (:type p)
                     (keyword? p) :sym
                     (string? p)  :lit)))
 
 (defn try-parse
-  "Wraps a `(parse p s state)` call, catching any parse error.
+  "Wraps a `(parse p s)` call, catching any parse error.
   Returns `[success? result]` instead."
-  [p s state]
+  [p s]
   (try
-    [true (parse p s state)]
+    [true (parse p s)]
     (catch #?(:clj Exception :cljs js/Error) e
       [false e])))
 
@@ -47,7 +47,7 @@
   {:type   :lit
    :target target})
 
-(defmethod parse :lit [p s _]
+(defmethod parse :lit [p s]
   (let [target (or (:target p) p) ; Auto-upgrade strings to literals.
         desc   (str "literal '" target "'")]
     (st/set-value (reduce (fn [s ch] (st/expect-char s #(= ch %) desc))
@@ -67,7 +67,7 @@
    :target  target
    :upcased (string/upper-case target)})
 
-(defmethod parse :lit-ic [{:keys [target upcased]} s _]
+(defmethod parse :lit-ic [{:keys [target upcased]} s]
   (let [desc (str "literal '" target "'")]
     (st/set-value (reduce (fn [s ch] (st/expect-char s #(= ch (upcase %)) desc))
                        s (seq upcased))
@@ -84,7 +84,7 @@
   {:type :alt
    :alts alts})
 
-(defmethod parse :alt [{:keys [alts]} s state]
+(defmethod parse :alt [{:keys [alts]} s]
   (loop [ps alts
          errs []]
     (if (empty? ps)
@@ -92,7 +92,7 @@
       (let [exps (mapcat (comp :parka/expectations ex-data) errs)]
         (errs/failed-expect s exps))
       ; Still some, so try the first one.
-      (let [[pass? result] (try-parse (first ps) s state)]
+      (let [[pass? result] (try-parse (first ps) s)]
         (if pass?
           result
           (recur (rest ps) (conj errs result)))))))
@@ -106,12 +106,12 @@
   {:type    :seq
    :parsers ps})
 
-(defmethod parse :seq [{:keys [parsers]} s state]
-  (let [results (reductions #(parse %2 %1 state) s parsers)]
+(defmethod parse :seq [{:keys [parsers]} s]
+  (let [results (reductions #(parse %2 %1) s parsers)]
     ; We want the text position of the last one, but with the value being a
     ; vector of all of them together.
     (st/set-value (last results)
-               (mapv :value (rest results)))))
+                  (mapv :value (rest results)))))
 
 (defn pseq-at
   "A variant of [[pseq]] that takes as its first arg an `index` (0-based).
@@ -122,16 +122,16 @@
    :inner (apply pseq ps)
    :index index})
 
-(defmethod parse :seq-at [{:keys [inner index]} s state]
-  (let [result (parse inner s state)]
+(defmethod parse :seq-at [{:keys [inner index]} s]
+  (let [result (parse inner s)]
     (update result :value nth index)))
 
 
 ;; With-action and stringify.
-(defmethod parse :action [{:keys [action inner]} s state]
-  (update (parse inner s state) :value action
+(defmethod parse :action [{:keys [action inner]} s]
+  (update (parse inner s) :value action
           {:loc   (location s)
-           :state state}))
+           :state (-> s :state :user)}))
 
 (defn with-action
   "Wraps a parser `p` and a function `f` into a new parser.
@@ -159,10 +159,10 @@
   {:type   :optional
    :inner  p})
 
-(defmethod parse :optional [{:keys [inner]} s state]
-  (try
-    (parse inner s state)
-    (catch #?(:clj Exception :cljs js/Error) _
+(defmethod parse :optional [{:keys [inner]} s]
+  (let [[matched? s']  (try-parse inner s)]
+    (if matched?
+      s'
       (assoc s :value nil))))
 
 (def any
@@ -170,7 +170,7 @@
   (This is a constant, not a function, because it's immutable.)"
   {:type :any-char})
 
-(defmethod parse :any-char [_ s _]
+(defmethod parse :any-char [_ s]
   (let [[ch eof?] (st/head s)]
     (if eof?
       (errs/parse-error s "unexpected EOF")
@@ -187,7 +187,7 @@
    :original chars
    :options  (into #{} chars)})
 
-(defmethod parse :one-of [{:keys [options original]} s _]
+(defmethod parse :one-of [{:keys [options original]} s]
   (let [[ch eof?] (st/head s)]
     (cond
       eof?         (errs/failed-expect-msg s "unexpected EOF" options)
@@ -204,7 +204,7 @@
    :original chars
    :options  (into #{} chars)})
 
-(defmethod parse :none-of [{:keys [options original]} s _]
+(defmethod parse :none-of [{:keys [options original]} s]
   (let [[ch eof?] (st/head s)]
     (cond
       eof?         (errs/parse-error s "unexpected EOF")
@@ -227,7 +227,7 @@
    :lo   lo
    :hi   hi})
 
-(defmethod parse :span [{:keys [lo hi]} s _]
+(defmethod parse :span [{:keys [lo hi]} s]
   (let [[ch eof?] (st/head s)]
     (cond
       eof?    (errs/parse-error s "unexpected EOF")
@@ -273,13 +273,13 @@
 
 
 ; The combined parser for the different values of many.
-(defmethod parse :many-min [{:keys [min inner capture]} s state]
+(defmethod parse :many-min [{:keys [min inner capture]} s]
   (let [[s2 found results e]
         (loop [s2      s
                found   0
                results (when capture (transient []))]
           (let [[success? res] (try
-                             [true  (parse inner s2 state)]
+                             [true  (parse inner s2)]
                              (catch #?(:clj Exception :cljs js/Error) e
                                [false e]))]
             (if success?
@@ -313,10 +313,10 @@
    :tail  (many (pseq-at 1 sep p))
    :min   1})
 
-(defmethod parse :sep-by [{:keys [first tail min]} s state]
-  (let [[pass?      result] (try-parse first s state)
+(defmethod parse :sep-by [{:keys [first tail min]} s]
+  (let [[pass?      result] (try-parse first s)
         [tail-pass? tails]  (if pass?
-                              (try-parse tail result state)
+                              (try-parse tail result)
                               [false nil])
         results             (cond
                               tail-pass? (update tails :value
@@ -362,13 +362,13 @@
    :terminator terminator
    :inner p})
 
-(defmethod parse :many-till [{:keys [inner terminator]} s state]
+(defmethod parse :many-till [{:keys [inner terminator]} s]
   (loop [s2      s
          results (transient [])]
-    (let [[term? s3] (try-parse terminator s2 state)]
+    (let [[term? s3] (try-parse terminator s2)]
       (if term?
         (assoc s3 :value (persistent! results))
-        (let [[inner? s4] (try-parse inner s2 state)]
+        (let [[inner? s4] (try-parse inner s2)]
           (if inner?
             (recur s4 (conj! results (:value s4)))
             (errs/failed-expect s2 (concat (errs/expectations s3)
@@ -397,22 +397,32 @@
   {:type :sym
    :name name})
 
-(defmethod parse :sym [p s state]
+(defmethod parse :sym [p s]
   (let [name  (or (:name p) p) ; Special case: auto-upgrading keywords to syms
-        inner (get-in state [:symbols name])]
+        inner (get-in s [:state :symbols name])]
     (if inner
-      (parse inner s state)
-      (errs/parse-error s (str "Unrecognized parsing symbol: " name)))))
+      (parse inner s)
+      (errs/parse-error s (str "Unrecognized parser name: " name)))))
 
 
-;; Top-level parsing constructions.
+(defmethod parse :grammar [{:keys [symbols start]} s]
+  ; On the way in, attach the :symbols to the stream's state.
+  ; On the way out, restore the previous :symbols. This allows nesting of
+  ; grammars, though that's an unusual thing to do.
+  (let [inner    (get symbols start)]
+    (when (not inner)
+      (errs/parse-error s (str "start symbol " start " is not defined")))
+    (assoc-in (parse inner (assoc-in s [:state :symbols] symbols))
+              [:state :symbols]
+              (-> s :state :symbols))))
+
 (defn grammar
   "Constructs a parser from a map of symbol names to parsers.
   The optional second argument (`start`) gives the symbol where parsing starts.
   The default start symbol is `:start`."
   ([symbols] (grammar symbols :start))
   ([symbols start]
-   {:symbols symbols :start start}))
+   {:type :grammar :symbols symbols :start start}))
 
 ;(defn with-actions
 ;  "Given a grammar and a map of symbol names to actions, wraps the corresponding
@@ -424,27 +434,37 @@
 
 (defn parse-str
   "The main entry point for parsing.
-  Takes a grammar `g`, a source `filename` (only for error messages)
-  and the `input` text, attempts to parse the entire string with the grammar.
+  Takes a parser `p`, a source `filename` (only for error messages)
+  and the `input` text, attempts to parse the entire string with the parser.
   If there is any input left at the end, parsing fails.
   On successful, complete parsing, returns the parsed value."
-  ([g filename input]
-   (parse-str g filename input {}))
-  ([{:keys [symbols start]} filename input state]
-   (let [p0     (get symbols start)
-         ; This is a little awkward because I have to tie the knot
-         ; and make a map that contains a reference to itself.
-         *p     (atom nil)
-         state' (assoc state
-                       :symbols symbols
-                       :parser  #(@*p (st/stream "<macro>" %))
-                       :macros  (atom (get state :macros {})))
-         _      (reset! *p #(parse p0 % state'))
-         s      (@*p (st/stream filename input))]
-     (if (st/at-eof? s)
-       (:value s)
+  ([p filename input]
+   (parse-str p filename input {}))
+  ([p filename input state]
+   ; The :state on the stream is always a map; the user's opaque state value is
+   ; attached at :user.
+   (let [s0 (st/stream filename input {:user state})
+         s1 (parse p s0)]
+     (if (st/at-eof? s1)
+       (:value s1)
        (errs/parse-error
-         s
-         (str "unexpected trailing output: "
-              (apply str (take 20 (st/remaining-input s)))))))))
+         s1 (apply str "unexpected trailing output: "
+                   (take 20 (st/remaining-input s1))))))))
 
+; These old innards are deprecated.
+; (let [p0     (get symbols start)
+;       ; This is a little awkward because I have to tie the knot
+;       ; and make a map that contains a reference to itself.
+;       *p     (atom nil)
+;       state' (assoc state
+;                     :symbols symbols
+;                     :parser  #(@*p (st/stream "<macro>" %))
+;                     :macros  (atom (get state :macros {})))
+;       _      (reset! *p #(parse p0 % state'))
+;       s      (@*p (st/stream filename input))]
+;   (if (st/at-eof? s)
+;     (:value s)
+;     (errs/parse-error
+;       s
+;       (str "unexpected trailing output: "
+;            (apply str (take 20 (st/remaining-input s)))))))

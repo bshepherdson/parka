@@ -38,13 +38,11 @@
                    (p/between :ws (p/sep-by :json-value :comma)))
                  (fn [vs _] (vec vs)))})
 
-(def json-parser (p/grammar json-rules))
-
 (defn test-parse [input]
-  (p/parse-str json-parser "<test>" input))
+  (p/parse-str (p/grammar json-rules) "<test>" input))
 
 (defn test-parse-from [sym input]
-  (p/parse-str (assoc json-parser :start sym) "<test>" input))
+  (p/parse-str (p/grammar json-rules sym) "<test>" input))
 
 (deftest test-number
   (is (= 1   (test-parse-from :number "1")))
@@ -96,6 +94,5 @@
   (is (= [1 false nil {"abc"  true
                        "def"  "yolo"
                        "asdf" nil}]
-         (test-parse "  [ 1  ,false,null , {  \"abc\"  :true, \"def\": \"yolo\", \"asdf\": null  }  ]  ")
-         )))
+         (test-parse "  [ 1  ,false,null , {  \"abc\"  :true, \"def\": \"yolo\", \"asdf\": null  }  ]  "))))
 
