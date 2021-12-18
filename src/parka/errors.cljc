@@ -30,4 +30,3 @@
                    :parka/message      msg
                    :parka/expectations expectations})))
 
-

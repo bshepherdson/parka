@@ -55,22 +55,6 @@
     :col 0
     :state state}))
 
-;(defn char-seq
-;  "Returns a lazy seq of the head characters of successive tail streams."
-;  [s]
-;  (lazy-seq
-;    (let [[h eof?] (head s)]
-;      (if eof?
-;        nil
-;        (cons h (char-seq (tail s)))))))
-;
-;(defn drop-chars
-;  "Returns the stream created by dropping n characters from s."
-;  [s n]
-;  (if (pos? n)
-;    (recur (tail s) (dec n))
-;    s))
-
 (defn expect-char
   "Matches a predicate `pred` against a stream. Returns the character if it
   matches.

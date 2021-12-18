@@ -451,20 +451,3 @@
          s1 (apply str "unexpected trailing output: "
                    (take 20 (st/remaining-input s1))))))))
 
-; These old innards are deprecated.
-; (let [p0     (get symbols start)
-;       ; This is a little awkward because I have to tie the knot
-;       ; and make a map that contains a reference to itself.
-;       *p     (atom nil)
-;       state' (assoc state
-;                     :symbols symbols
-;                     :parser  #(@*p (st/stream "<macro>" %))
-;                     :macros  (atom (get state :macros {})))
-;       _      (reset! *p #(parse p0 % state'))
-;       s      (@*p (st/stream filename input))]
-;   (if (st/at-eof? s)
-;     (:value s)
-;     (errs/parse-error
-;       s
-;       (str "unexpected trailing output: "
-;            (apply str (take 20 (st/remaining-input s)))))))
