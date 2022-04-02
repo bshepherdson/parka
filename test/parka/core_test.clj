@@ -51,15 +51,27 @@
       (is (= ["0x" "123"] (test-parse p "0x123"))))))
 
 (deftest test-pseq
-  (let [p (sut/pseq (sut/lit "a") (sut/lit "b") (sut/lit-ic "C"))]
-    (is (= ["a" "b" "C"] (test-parse p "abc")))
-    (is (= ["a" "b" "C"] (test-parse p "abC")))
-    (is (thrown-with-msg? Exception #"expected literal 'a'"
-                          (test-parse p "xbC")))
-    (is (thrown-with-msg? Exception #"expected literal 'b'"
-                          (test-parse p "ayC")))
-    (is (thrown-with-msg? Exception #"expected literal 'C'"
-                          (test-parse p "abZ")))))
+  (testing "direct calls"
+    (let [p (sut/pseq (sut/lit "a") (sut/lit "b") (sut/lit-ic "C"))]
+      (is (= ["a" "b" "C"] (test-parse p "abc")))
+      (is (= ["a" "b" "C"] (test-parse p "abC")))
+      (is (thrown-with-msg? Exception #"expected literal 'a'"
+                            (test-parse p "xbC")))
+      (is (thrown-with-msg? Exception #"expected literal 'b'"
+                            (test-parse p "ayC")))
+      (is (thrown-with-msg? Exception #"expected literal 'C'"
+                            (test-parse p "abZ")))))
+
+  (testing "vector shorthand"
+    (let [p [(sut/lit "a") (sut/lit "b") (sut/lit-ic "C")]]
+      (is (= ["a" "b" "C"] (test-parse p "abc")))
+      (is (= ["a" "b" "C"] (test-parse p "abC")))
+      (is (thrown-with-msg? Exception #"expected literal 'a'"
+                            (test-parse p "xbC")))
+      (is (thrown-with-msg? Exception #"expected literal 'b'"
+                            (test-parse p "ayC")))
+      (is (thrown-with-msg? Exception #"expected literal 'C'"
+                            (test-parse p "abZ"))))))
 
 (deftest test-pseq-at
   (let [mkp #(sut/pseq-at % (sut/lit "a") (sut/lit "b") (sut/lit-ic "C"))]
@@ -81,6 +93,10 @@
 
 (deftest test-optional
   (let [p (sut/pseq (sut/optional (sut/lit "a"))
+                    (sut/lit "b"))]
+    (is (= ["a" "b"] (test-parse p "ab")))
+    (is (= [nil "b"] (test-parse p "b"))))
+  (let [p (sut/pseq (sut/opt (sut/lit "a"))
                     (sut/lit "b"))]
     (is (= ["a" "b"] (test-parse p "ab")))
     (is (= [nil "b"] (test-parse p "b")))))

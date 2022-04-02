@@ -58,6 +58,16 @@ An example will go a long way:
 Note that there's no code generation, macros, or other magic here - the
 combinators are simply functions that return data structures.
 
+### Shorthands
+
+Several of the parsing functions are very commonly used, so a shorthand can
+be used instead, to make parsers easier to read and write.
+
+- `[p1 p2 p3]` is equivalent to `(pseq p1 p2 p3)`.
+- `:some-keyword` is equivalent to `(sym :some-keyword)`, looking up that parser
+  by name in the grammar.
+- `"literal string"` is equivalent to `(lit "literal-string")`.
+
 
 ### Whitespace
 

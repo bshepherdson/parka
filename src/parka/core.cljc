@@ -23,9 +23,12 @@
 (defn location [s]
   (select-keys s [:filename :line :col]))
 
+(declare pseq)
+
 (defmulti parse (fn [p _]
                   (cond
                     (map? p)     (:type p)
+                    (vector? p)  :seq
                     (keyword? p) :sym
                     (string? p)  :lit)))
 
@@ -107,8 +110,9 @@
   {:type    :seq
    :parsers ps})
 
-(defmethod parse :seq [{:keys [parsers]} s]
-  (let [results (reductions #(parse %2 %1) s parsers)]
+(defmethod parse :seq [p s] ; p might be a map or vector
+  (let [ps      (if (map? p) (:parsers p) p)
+        results (reductions #(parse %2 %1) s ps)]
     ; We want the text position of the last one, but with the value being a
     ; vector of all of them together.
     (st/set-value (last results)
@@ -159,6 +163,10 @@
   [p]
   {:type   :optional
    :inner  p})
+
+(def opt
+  "Shorthand for `optional`."
+  optional)
 
 (defmethod parse :optional [{:keys [inner]} s]
   (let [[matched? s']  (try-parse inner s)]
