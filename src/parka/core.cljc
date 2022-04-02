@@ -14,6 +14,7 @@
 
   Note that `(parse :some-keyword ...)` is treated as `(sym :some-keyword)`,
   and `(parse \"a string\" ...)` is treated as `(lit \"a string\")`."
+  (:refer-clojure :rename {not core-not})
   (:require
     [clojure.string :as string]
     [parka.errors :as errs]
@@ -385,6 +386,33 @@
   ([start end inner]
    (pseq-at 1 start inner end)))
 
+(defn lookahead
+  "Wraps an inner parser. Fails if it does. If the inner parser succeeds, this
+  succeeds too but consumes no input."
+  [inner]
+  {:type  :lookahead
+   :inner inner})
+
+(defmethod parse :lookahead [p s]
+  (parse (:inner p) s)
+  (dissoc s :value))
+
+(defn not
+  "Negative lookahead. Takes a parser. If that parser passes, not throws an
+  error; if it fails not succeeds without consuming any input."
+  [inner]
+  {:type  :not
+   :inner inner})
+
+(defmethod parse :not [p s]
+  (let [matched? (try
+                   (parse (:inner p) s)
+                   true
+                   (catch Exception _
+                     false))]
+    (if matched?
+      (throw (errs/parse-error s "not clause parsed successfully"))
+      (dissoc s :value))))
 
 (defn sym
   "References a named parser in the symbol table, generally by a keyword.
@@ -410,7 +438,7 @@
   ; On the way out, restore the previous :symbols. This allows nesting of
   ; grammars, though that's an unusual thing to do.
   (let [inner    (get symbols start)]
-    (when (not inner)
+    (when (core-not inner)
       (errs/parse-error s (str "start symbol " start " is not defined")))
     (assoc-in (parse inner (assoc-in s [:state :symbols] symbols))
               [:state :symbols]

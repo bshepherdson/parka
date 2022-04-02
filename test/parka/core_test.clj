@@ -192,3 +192,17 @@
                         :c     (sut/lit-ic "c")})]
     (is (= ["a" "b" "c"] (sut/parse-str g "<test>" "abc")))))
 
+(deftest test-lookahead
+  (let [g (sut/grammar {:start (sut/pseq "a" (sut/lookahead "bbb") (sut/many "b"))})]
+    (is (= ["a" nil ["b" "b" "b"]] (sut/parse-str g "<test>" "abbb")))
+    (is (= ["a" nil ["b" "b" "b" "b" "b"]] (sut/parse-str g "<test>" "abbbbb")))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"expected literal 'bbb'"
+          (sut/parse-str g "<test>" "abb")))))
+
+(deftest test-not
+  (let [g (sut/grammar {:start (sut/pseq "a" (sut/not "b") sut/any)})]
+    (is (= ["a" nil \c] (sut/parse-str g "<test>" "ac")))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (sut/parse-str g "<test>" "abc")))))
+
