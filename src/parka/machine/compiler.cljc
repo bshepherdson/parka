@@ -11,6 +11,7 @@
       (char?   pat) :parka/char
       (string? pat) :parka/string
       (vector? pat) :parka/seq
+      (set?    pat) :parka/set
       (map?    pat) (:parka/type pat))))
 
 (defn compile-expr [p]
@@ -63,6 +64,10 @@
                   p
                   [[:back-commit 2]
                    [:fail]]))))
+
+(defmethod compile :parka/set
+  [chs]
+  [[:charset chs]])
 
 (defmethod compile :parka/nonterminal
   [{:parka/keys [nonterminal]}]

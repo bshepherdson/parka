@@ -1,4 +1,4 @@
-(ns parka.machine.peg 
+(ns parka.machine.peg
   (:require
     [parka.errors :as errs]))
 
@@ -11,8 +11,13 @@
 ;;; :pos   i
 ;;; :caps  {}}
 
-(defn- head [{:keys [input pos]}]
-  (.charAt input pos))
+(defn- eof? [{:keys [input pos]}]
+  (>= pos (.length input)))
+
+(defn- head [{:keys [input pos] :as m}]
+  (if (eof? m)
+    nil
+    (.charAt input pos)))
 
 (defn- pos+
   ([m] (pos+ m 1))
@@ -32,12 +37,13 @@
 (defn- fail
   "Drain the stack until we find a `[pc' pos' caps']` pair; set these values."
   [m err]
-  (let [[pc pos caps :as tos] (peek (:stack m))]
+  (let [tos (peek (:stack m))]
     (if (nil? tos)
       (abort m err) ; We've run out of stack - a failed parse.
       (let [m' (update m :stack pop)]
-        (if (vector? tos)
-          (assoc m' :pc pc :pos pos :caps caps)
+        (if (map? tos)
+          (let [{:keys [pc pos caps]} tos]
+            (assoc m' :pc pc :pos pos :caps caps))
           (recur m' err))))))
 
 (defmulti exec (fn [_ [op]] op))
@@ -57,9 +63,9 @@
   [{:keys [pos pc caps] :as m} [_ delta offset]]
   (-> m
       pc+
-      (update :stack conj [(+ pc delta)
-                           (- pos (or offset 0))
-                           caps])))
+      (update :stack conj {:pc   (+ pc delta)
+                           :pos  (- pos (or offset 0))
+                           :caps caps})))
 
 (defmethod exec :jump
   [m [_ delta]]
@@ -90,17 +96,17 @@
   [m [_ delta]]
   (-> m
       (pc+ delta)
-      (update :stack #(conj (pop %) (:pos m)))))
+      (update :stack #(conj (pop %) (assoc (peek %) :pos (:pos m) :caps (:caps m))))))
 
 (defmethod exec :back-commit
   ;; Moves PC by delta, pops a backtracking record from the stack, ignores its PC
   ;; but moves the input to its position.
   [m [_ delta]]
-  (let [[_ pos'] (peek (:stack m))]
+  (let [tos (peek (:stack m))]
     (-> m
         (pc+ delta)
         (update :stack pop)
-        (assoc :pos pos'))))
+        (assoc :pos (:pos tos)))))
 
 (defmethod exec :capture
   [m [_ cap-tag]]

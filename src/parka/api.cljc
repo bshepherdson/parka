@@ -18,11 +18,69 @@
 
   Once you have constructured your complete expression, call `compile` with it.
   The returned engine can be run by calling `parse`."
-  (:refer-clojure :exclude [compile])
+  (:refer-clojure :exclude [and compile not seq])
   (:require
     [parka.machine.compiler :as compiler]
     [parka.machine.peg :as engine]))
 
+;;;; Parsing expression builders
+(defn seq
+  "Runs a sequence of parsers in order, failing if any of them fail.
+  Passing a vector of parsers is an equivalent shorthand."
+  [& exprs]
+  (vec exprs))
+
+(defn alt
+  "Attempts each expression in order. When one matches, the `alt` is done.
+  If all expressions fail, so does the `alt`."
+  [& exprs]
+  {:parka/type :parka/alt
+   :parka/alts exprs})
+
+(defn many
+  "Given an inner expression, returns an expression that attempts to match it 0
+  or more times.
+
+  Be careful: parsers that parse nothing and succeed can cause infinite loops."
+  [expr]
+  {:parka/type  :parka/star
+   :parka/inner expr})
+
+(defn one-of
+  [chs]
+  (into #{} chs))
+
+(defn and
+  "Positive look-ahead. Attempts to parse `expr`, failing if `expr` fails.
+  Either way, `(and expr)` consumes no input."
+  [expr]
+  {:parka/type  :parka/and
+   :parka/inner expr})
+
+(defn not
+  "Negative look-ahead. Attempts to parse `expr`, failing if `expr` passes and
+  passing if `expr` fails.
+  Either way, `(not expr)` consumes no input."
+  [expr]
+  {:parka/type  :parka/not
+   :parka/inner expr})
+
+(defn opt
+  "Given a parsing `expr`, matches 0 or 1 copies of it.
+
+  Equivalent to `(alt [(and expr) expr] (not expr))`."
+  [expr]
+  (alt [(and expr) expr] (not expr)))
+
+(def any
+  "Matches any single character. Not a function, just a constant."
+  {:parka/type :parka/any})
+
+(def eof
+  "Matches end-of-file. Useful for ensuring the entire input is consumed."
+  (not any))
+
+;;;; Top-level functions
 (defn compile [expr]
   (compiler/compile-expr expr))
 
