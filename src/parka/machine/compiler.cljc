@@ -1,18 +1,20 @@
 (ns parka.machine.compiler
   "Handles the compilation from the PEG grammar syntax to the parsing machine
   instructions."
-  (:refer-clojure :exclude [compile]) 
+  (:refer-clojure :exclude [compile])
   (:require
     [parka.errors :as errs]))
 
 (defmulti compile
   (fn [pat]
     (cond
-      (char?   pat) :parka/char
-      (string? pat) :parka/string
-      (vector? pat) :parka/seq
-      (set?    pat) :parka/set
-      (map?    pat) (:parka/type pat))))
+      (map?     pat) (:parka/type pat)
+      (keyword? pat) :parka/nonterminal
+      (char?    pat) :parka/char
+      (string?  pat) :parka/string
+      (vector?  pat) :parka/seq
+      (set?     pat) :parka/set
+      :else (throw (ex-info "bad compile pattern" {:value pat})))))
 
 (defn compile-expr [p]
   (into (compile p) [[:end]]))
@@ -70,7 +72,7 @@
   [[:charset chs]])
 
 (defmethod compile :parka/nonterminal
-  [{:parka/keys [nonterminal]}]
+  [nonterminal]
   [[:open-call nonterminal]])
 
 (defn compile-grammar [[[sym pat] & rs] labels code]
@@ -82,24 +84,26 @@
       (recur rs labels' code'))))
 
 (defn resolve-call [[op v :as code] pc labels]
-  (if (= op :open-call)
-    (let [target (get labels v)]
-      [:call (- target pc)])
+  (if (#{:open-call :open-jump} op)
+    (if-let [target (get labels v)]
+      [(if (= :open-call op) :call :jump) (- target pc)]
+      (throw (ex-info (str "unknown grammar rule: " v) {:rule v})))
     ; Nothing to do for non-calls.
     code))
 
 (defn resolve-calls [code labels]
-  (into [] (map-indexed #(resolve-call %1 %2 labels) code)))
+  (into [] (map-indexed #(resolve-call %2 %1 labels) code)))
 
 (defmethod compile :parka/grammar
   [{:parka/keys [rules start]}]
   (let [[labels code] (compile-grammar rules
                                        {:parka/top 0}
-                                       [[:call start]
-                                        [:jump :parka/end]])
+                                       [[:open-call start]
+                                        [:open-jump :parka/end]])
         labels'       (assoc labels :parka/end (count code))
-        code'         (into code [[:end]])]
-    (resolve-calls code' labels')))
+        ;code'         (into code [[:end]])
+        ]
+    (resolve-calls code labels')))
 
 (defmethod compile :parka/star
   [{:parka/keys [inner]}]

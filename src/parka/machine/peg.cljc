@@ -78,7 +78,7 @@
       (update :stack conj (inc pc))))
 
 (defmethod exec :return
-  [{:keys [stack] :as m}]
+  [{:keys [stack] :as m} _]
   (-> m
       (assoc :pc (peek stack))
       (update :stack pop)))

@@ -18,7 +18,7 @@
 
   Once you have constructured your complete expression, call `compile` with it.
   The returned engine can be run by calling `parse`."
-  (:refer-clojure :exclude [and compile not seq])
+  (:refer-clojure :exclude [+ * and compile not seq])
   (:require
     [parka.machine.compiler :as compiler]
     [parka.machine.peg :as engine]))
@@ -37,7 +37,7 @@
   {:parka/type :parka/alt
    :parka/alts exprs})
 
-(defn many
+(defn *
   "Given an inner expression, returns an expression that attempts to match it 0
   or more times.
 
@@ -45,6 +45,12 @@
   [expr]
   {:parka/type  :parka/star
    :parka/inner expr})
+
+(defn +
+  "Like `*` but it matches 1 or more times.
+   Equivalent to `[expr (* expr)]`."
+  [expr]
+  [expr (* expr)])
 
 (defn one-of
   [chs]
@@ -72,6 +78,16 @@
   [expr]
   (alt [(and expr) expr] (not expr)))
 
+(defn grammar
+  "Given a map `rules` of `:label` to expression, and the `start` label, builds
+  a grammar composed of many named expressions.
+  These expressions can be (mutually and directly) recursive, but they cannot
+  be \"left recursive\": `{:a [:a \"foo\"]}` causes an infinite loop."
+  [rules start]
+  {:parka/type  :parka/grammar
+   :parka/rules rules
+   :parka/start start})
+
 (def any
   "Matches any single character. Not a function, just a constant."
   {:parka/type :parka/any})
@@ -85,14 +101,14 @@
   (compiler/compile-expr expr))
 
 (defn parse
-  "Given a parsing `engine`, source `label` (eg. the file name), and input
+  "Given a parsing `engine`, `source` label (eg. the file name), and input
   `text`, attempts to parse the input.
 
   The `engine` must be one compiled by `compile`.
 
   Returns either `{:success \"string matched\"}` or `{:error ...}`."
-  [engine label text]
-  (let [{:keys [error input pos]} (engine/run engine label text)]
+  [engine source text]
+  (let [{:keys [error input pos]} (engine/run engine source text)]
     (if error
       {:error error}
       {:success (subs input 0 pos)})))

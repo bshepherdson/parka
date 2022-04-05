@@ -42,15 +42,17 @@
     (is (= (expected 1 0 #{\a \b \c})
            (test-parse p "d")))))
 
-(deftest test-many
-  (let [p (sut/many \a)]
-    (is (= {:success "aaaa"}
-           (test-parse p "aaaab_c")))
-    (is (= {:success ""}
-           (test-parse p "X")))
-    (is (= {:success "a"}
-           (test-parse p "ab_cX")))))
+(deftest test-star
+  (let [p (sut/* \a)]
+    (is (= {:success "aaaa"} (test-parse p "aaaab_c")))
+    (is (= {:success "a"}    (test-parse p "ab_cX")))
+    (is (= {:success ""}     (test-parse p "X")))))
 
+(deftest test-plus
+  (let [p (sut/+ \a)]
+    (is (= {:success "aaaa"}    (test-parse p "aaaab_c")))
+    (is (= {:success "a"}       (test-parse p "ab_cX")))
+    (is (= (expected 1 0 ["a"]) (test-parse p "X")))))
 
 (deftest test-alt
   (testing "basics"
@@ -63,13 +65,13 @@
 
   (testing "backtracking sequences"
     (let [p (sut/alt
-              ["0x" (sut/many (sut/one-of "0123456789abcdefABCDEF"))]
-              (sut/many (sut/one-of "0123456789")))]
+              ["0x" (sut/* (sut/one-of "0123456789abcdefABCDEF"))]
+              (sut/* (sut/one-of "0123456789")))]
       (is (= {:success "12"}      (test-parse p "12")))
       (is (= {:success "0x12aB3"} (test-parse p "0x12aB3"))))))
 
 (deftest test-and
-  (let [p ["a" (sut/and "bbb") (sut/many "b")]]
+  (let [p ["a" (sut/and "bbb") (sut/* "b")]]
     (is (= {:success "abbb"}   (test-parse p "abbb")))
     (is (= {:success "abbbbb"} (test-parse p "abbbbb")))
     (is (= {:error :parka.machine.peg/expected-failure}
@@ -87,7 +89,7 @@
     (is (= {:success "b"}  (test-parse p "b")))))
 
 (deftest test-eof
-  (let [base ["a" (sut/many \b)]
+  (let [base ["a" (sut/* \b)]
         eofd (conj base sut/eof)]
     (is (= {:success "abbb"} (test-parse base "abbbc")))
     (is (= {:success "abbb"} (test-parse eofd "abbb")))
