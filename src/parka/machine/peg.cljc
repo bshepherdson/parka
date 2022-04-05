@@ -9,7 +9,7 @@
 ;;; :stack [...]
 ;;; :input "str"
 ;;; :pos   i
-;;; :caps  {}}
+;;; :caps  []}
 
 (defn- eof? [{:keys [input pos]}]
   (>= pos (.length input)))
@@ -96,7 +96,9 @@
   [m [_ delta]]
   (-> m
       (pc+ delta)
-      (update :stack #(conj (pop %) (assoc (peek %) :pos (:pos m) :caps (:caps m))))))
+      (update :stack #(conj (pop %) (assoc (peek %)
+                                           :pos (:pos m)
+                                           :caps (:caps m))))))
 
 (defmethod exec :back-commit
   ;; Moves PC by delta, pops a backtracking record from the stack, ignores its PC
@@ -107,12 +109,6 @@
         (pc+ delta)
         (update :stack pop)
         (assoc :pos (:pos tos)))))
-
-(defmethod exec :capture
-  [m [_ cap-tag]]
-  (-> m
-      pc+
-      (assoc-in [:caps (:pos m)] cap-tag)))
 
 (defmethod exec :fail
   [m [_ err]]
@@ -159,20 +155,60 @@
     (-> m pc+ pos+)
     (pc+ m delta)))
 
+;;; Capturing and stack management
+(defmethod exec :drop
+  [m _]
+  (-> m
+      pc+
+      (update :caps pop)))
+
+(defmethod exec :push
+  [m [_ value]]
+  (-> m
+      pc+
+      (update :caps conj value)))
+
+(defmethod exec :mark
+  [{:keys [pos] :as m} _]
+  (-> m
+      pc+
+      (update :caps conj pos)))
+
+(defmethod exec :capture
+  [{:keys [input pos caps] :as m} _]
+  (let [captured (subs input (peek caps) pos)]
+    (-> m
+        pc+
+        (assoc :caps (conj (pop caps) captured)))))
+
+(defmethod exec :apply-capture-1
+  [{:keys [caps] :as m} [_ f]]
+  (let [tos' (f (peek caps))]
+    (-> m
+        pc+
+        (assoc :caps (conj (pop caps) tos')))))
+
+(defmethod exec :apply-capture-2
+  [{:keys [caps] :as m} [_ f]]
+  (prn caps)
+  (let [tos    (peek caps)
+        caps1  (pop  caps)
+        nos    (peek caps1)
+        caps2  (pop  caps1)
+        tos'   (f nos tos)]
+    (-> m
+        pc+
+        (assoc :caps (conj caps2 tos')))))
+
 (defn run [code label text]
   (loop [m {:pc       0
             :code     code
             :stack    []
             :input    text
             :filename label
-            :pos      0}]
+            :pos      0
+            :caps     []}]
     (if (:done? m)
       m
       (recur (exec m (nth (:code m) (:pc m)))))))
 
-;;; {:pc   n
-;;; :code  [...]
-;;; :stack [...]
-;;; :input "str"
-;;; :pos   i
-;;; :caps  {}}

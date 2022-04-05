@@ -37,6 +37,14 @@
   {:parka/type :parka/alt
    :parka/alts exprs})
 
+(defn action
+  "Given an expression and a unary function, runs that action function over the
+  parse result returned by the inner expression."
+  [expr f]
+  {:parka/type   :parka/action
+   :parka/action f
+   :parka/inner  expr})
+
 (defn *
   "Given an inner expression, returns an expression that attempts to match it 0
   or more times.
@@ -50,7 +58,9 @@
   "Like `*` but it matches 1 or more times.
    Equivalent to `[expr (* expr)]`."
   [expr]
-  [expr (* expr)])
+  (action [expr (* expr)]
+          (fn [{[x xs] :parka/matches}]
+            (into [x] xs))))
 
 (defn one-of
   [chs]
@@ -108,10 +118,12 @@
 
   Returns either `{:success \"string matched\"}` or `{:error ...}`."
   [engine source text]
-  (let [{:keys [error input pos]} (engine/run engine source text)]
+  (let [{:keys [error caps] :as res} (engine/run engine source text)]
+    (when (not= 1 (count caps))
+      (throw (ex-info "bad capture!" res)))
     (if error
       {:error error}
-      {:success (subs input 0 pos)})))
+      {:success (peek caps)})))
 
 
 (comment
@@ -121,7 +133,4 @@
          "<test>"
          "abc")
   )
-
-; p? is &pp / !p
-; p+ is pp*
 
