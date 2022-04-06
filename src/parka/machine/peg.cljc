@@ -11,13 +11,12 @@
 ;;; :pos   i
 ;;; :caps  []}
 
-(defn- eof? [{:keys [input pos]}]
-  (>= pos (.length input)))
-
-(defn- head [{:keys [input pos] :as m}]
-  (if (eof? m)
-    nil
-    (.charAt input pos)))
+(defn- head [^clojure.lang.IPersistentMap m]
+  (let [input ^String (.valAt m :input)
+        pos   ^long   (.valAt m :pos)]
+    (if (>= pos (.length input))
+      nil
+      (.charAt input pos))))
 
 (defn- pos+
   ([m] (pos+ m 1))

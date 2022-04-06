@@ -21,6 +21,7 @@
   (:refer-clojure :exclude [+ * and compile drop not seq str])
   (:require
     [clojure.string :as string]
+    [parka.errors :as errors]
     [parka.machine.compiler :as compiler]
     [parka.machine.peg :as engine]))
 
@@ -145,9 +146,11 @@
   (let [{:keys [error caps] :as res} (engine/run engine source text)]
     (when (not= 1 (count caps))
       (throw (ex-info "bad capture!" res)))
-    (if error
-      {:error error}
-      {:success (peek caps)})))
+    (cond
+      (clojure.core/and
+        error (keyword? error)) {:error error}
+      error        {:error (update error :parka/loc errors/pretty-location)}
+      :else        {:success (peek caps)})))
 
 
 (comment

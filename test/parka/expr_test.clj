@@ -6,13 +6,15 @@
 
 (def math-rules
   {:start    (p/pick [0] [:expr p/eof])
-   :expr     (p/alt (p/action [:mult    "+" :expr]
-                              (fn [[m _ e]]
-                                (+ m e)))
+   :expr     (p/alt (p/action
+                      [:mult    "+" :expr]
+                      (fn [[m _ e]]
+                        (+ m e)))
                     :mult)
-   :mult     (p/alt (p/action [:primary "*" :mult]
-                              (fn [[p _ m]]
-                                (* p m)))
+   :mult     (p/alt (p/action
+                      [:primary "*" :mult]
+                      (fn [[p _ m]]
+                        (* p m)))
                     :primary)
    :primary  (p/alt (p/pick [1] [\( :expr \)])
                     :number)

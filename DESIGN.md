@@ -1,39 +1,45 @@
 # Design Notes
 
+## PEG Machine
+
+Parka works by compiling the user's _parsing expressions_ into a program for an
+abstract parsing machine, then executing that program against a given input.
+
+This two-step process aims to remove as much logic from the main parsing engine
+as possible, so that it can run swiftly and simply.
+
+The compilation process is contained in `parka.machine.compiler` and the
+execution process in `parka.machine.peg`.
+
 ## Capturing and AST Construction
 
-Given a grammar like this one (from `expr_test.clj`):
+Given a grammar like this one (from `expr_test.clj`, with actions removed):
 
 ```clojure
 {:start    [:expr p/eof]
- :expr     (p/alt [:mult    "+" :expr] :mult)
- :mult     (p/alt [:primary "*" :mult] :primary)
- :primary  (p/alt [\( :expr \)] (p/+ :decimal))
- :decimal  (p/one-of "0123456789")}
+ :expr     (p/alt [:mult    "+" :expr]
+                  :mult)
+ :mult     (p/alt [:primary "*" :mult]
+                  :primary)
+ :primary  (p/alt [\( :expr \)]
+                  :number)
+ :number   [(p/? \-) :decimal]
+ :decimal  (p/+ :digit)
+ :digit    (p/one-of "0123456789")}
 ```
 
-Here are the types of AST construction we care about:
-
-- Terminals and pseudo-terminals as strings.
-    - `\c` and `#{\a \b \c}` return single-character strings
-    - `"abc"` returns the matched string.
-    - `:keywords-with-trailing-hyphen-` are concatenated to strings.
-- `alt`s just return the capture of the winner.
-    - Maybe it would be useful to label those?
-- `seq`s return a map like this, for the first case of `:expr`: `{:mult ...
-  :expr ...}`, that is it captures the nonterminals by name.
-    - If there are multiple nonterminals with the same key, they are collected
-      into a vector in order.
-    - String-returning (pseudo-)terminals are dropped.
-        - TODO Probably fix this with `{:label "terminal"}` pairs.
-- `action` calls override the default with a function. They get passed the
-  raw value from below, and whatever it returns becomes the value.
+- `\(` and `"+"` literals return strings (even character literals).
+    - Same for `one-of`.
+- `alt` returns whatever the winning alternative matched.
+- `[]` sequences return a vector of the inner results.
+- `?` optionals return the value if it matched, or nil if it didn't.
+- `*` and `+` return a vector of results (possibly empty for `*`)
 
 ### Implementation
 
 Capturing is handled as a kind of stack machine. Each expression captures for
-itself, leaving the value on a stack. Combined captures, such as for `seq`, use
-functions to combine the top few entries on the stack.
+itself, leaving the value on a stack. Combined captures, such as for `seq`, add
+extra code to merge the individual results into a list.
 
 The stack machine is powered by the following instructions:
 
