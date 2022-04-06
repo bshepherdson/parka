@@ -2,22 +2,22 @@
   "Test that builds and exercises a JSON parser using this library."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [parka.core :as p]))
+    [parka.api :as p]))
 
 (def json-rules
-  {:start      (p/between :ws :json-value)
+  {:start      (p/keep :json-value [:ws :json-value :ws p/eof])
    :json-value (p/alt :array :object :null :bool :string :number)
-   :ws         (p/many-drop (p/one-of " \t\r\n"))
-   :null       (p/with-action "null" (constantly nil))
-   :bool       (p/with-action
+   :ws         (p/* (p/one-of " \t\r\n"))
+   :null       (p/action "null" (constantly nil))
+   :bool       (p/action
                  (p/alt "true" "false")
-                 (fn [v _] (= v "true")))
+                 #(= % "true"))
    :hex        (p/one-of "0123456789ABCDEFabcdef")
-   :unicode    (p/with-action (p/pseq "\\u" :hex :hex :hex :hex)
-                 (fn [[_ a b c d] _]
+   :unicode    (p/action ["\\u" :hex :hex :hex :hex]
+                 (fn [{[a b c d] :hex}]
                    (char (Long/parseLong (str a b c d) 16))))
-   :escaped    (p/with-action (p/pseq-at 1 "\\" (p/one-of "\"\\/nrbft"))
-                 (fn [v _]
+   :escaped    (p/action ["\\" (p/one-of "\"\\/nrbft")]
+                 (fn [[_ v]]
                    (case v
                      \n \newline
                      \r \return
@@ -25,20 +25,25 @@
                      \f \formfeed
                      \t \tab
                      v)))
-   :strchar    (p/alt :unicode :escaped p/any)
-   :string     (p/stringify (p/pseq-at 1 "\""
+   :strchar    (p/alt :unicode :escaped [(p/not \") p/any])
+   :string     [\" (p/* :strchar) \"]
+   #_(p/stringify (p/pseq-at 1 "\""
                                        (p/many-till :strchar "\"")))
 
    :pm         (p/one-of "+-")
-   :digits     (p/stringify (p/many1 (p/span \0 \9)))
-   :number     (p/with-action
-                 (p/pseq (p/optional :pm) :digits
-                         (p/optional (p/pseq-at 1 "." :digits))
-                         (p/optional (p/pseq (p/lit-ic "e")
-                                             (p/optional :pm)
-                                             :digits)))
-                 (fn [[sign main d [_ em e]] _]
-                   (let [n (Integer/parseInt main)
+   :digits     (p/+ (p/one-of "0123456789"))
+   #_(p/stringify (p/many1 (p/span \0 \9)))
+   :number     (p/action
+                 [(p/? :pm)
+                  :digits
+                  (p/? (p/keep :digits ["." :digits]))
+                  (p/? [#{\e \E}
+                        {:pm (p/? :pm)}
+                        :digits])]
+                 (fn [res]
+                   (prn res)
+                   0
+                   #_(let [n (Integer/parseInt main)
                          pos (if (or d e)
                                (Double/parseDouble
                                  (str n
@@ -49,27 +54,27 @@
                        (- pos)
                        pos))))
 
-   :comma      (p/pseq :ws "," :ws)
-   :object     (p/with-action
-                 (p/between
-                   "{" "}"
-                   (p/between :ws (p/sep-by :key-value :comma)))
-                 (fn [kvs _]
-                   (into {} kvs)))
-   :key-value  (p/with-action
-                 (p/pseq :string :ws ":" :ws :json-value)
-                 (fn [[k _ _ _ v] _] [k v]))
-   :array      (p/with-action
-                 (p/between
-                   "[" "]"
-                   (p/between :ws (p/sep-by :json-value :comma)))
-                 (fn [vs _] (vec vs)))})
+   :comma      [:ws "," :ws]
+   :object     (p/action [\{ :ws
+                          :key-value
+                          {:tail (p/* (p/keep :key-value [:comma :key-value]))}
+                          :ws \}]
+                 (fn [{:keys [key-value tail]}]
+                   (reduce (into {} key-value) tail)))
+   :key-value  (p/action
+                 [:string :ws ":" :ws :json-value]
+                 (fn [{:keys [string json-value]}]
+                   [string json-value]))
+   :array      (p/keep :array-guts [\[ :ws :array-guts :ws \]])
+   :array-guts (p/alt [:json-value
+                       {:tail (p/* (p/keep :json-value [:comma :json-value]))}]
+                      (p/and \]))})
 
 (defn test-parse [input]
-  (p/parse-str (p/grammar json-rules) "<test>" input))
+  (p/parse (p/compile (p/grammar json-rules :start)) "<test>" input))
 
 (defn test-parse-from [sym input]
-  (p/parse-str (p/grammar json-rules sym) "<test>" input))
+  (p/parse (p/compile (p/grammar json-rules sym)) "<test>" input))
 
 (deftest test-number
   (is (= 1        (test-parse-from :number "1")))

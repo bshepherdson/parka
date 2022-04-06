@@ -57,10 +57,24 @@
     ;; If it's a vector, it's just inlined with the same logic.
     (vector? p)  (compile p (assoc s :nested? true))
 
+    ;; For a map with one value, take it as {label target}.
+    (and (map? p) (= 1 (count p)))
+    (let [[label inner] (first p)
+          compiled      (compile inner s)
+          f             (partial append-seq-result label)]
+      (into compiled [[:apply-capture-2 f]]))
+
     ;; For any other parser, use the key :parka/matches
     :else   (let [compiled     (compile p s)
                   f            (partial append-seq-result :parka/matches)]
               (into compiled [[:apply-capture-2 f]]))))
+
+(defn- compile-seq-item-drop
+  [p s]
+  (prn "CSID" p)
+  (if (and (map? p) (not (:parka/type p)))
+    (compile (first (vals p)) s)
+    (compile p s)))
 
 (defmethod compile :parka/seq
   [ps {:keys [nested? capture?] :as s}]
@@ -71,8 +85,8 @@
               :else                  nil)
         s'  (dissoc s :nested?)
         compiled (if capture?
-                   (mapcat #(compile-seq-item-cap % s') ps)
-                   (mapcat #(compile % s') ps))]
+                   (mapcat #(compile-seq-item-cap  % s') ps)
+                   (mapcat #(compile-seq-item-drop % s') ps))]
     (into [] (concat pre compiled))))
 
 (defn- compile-alt [alts s]
@@ -95,7 +109,7 @@
   ; No need to really capture lookahead.
   (let [p (compile inner (assoc s :capture? false))]
     (into []
-          (concat [[:choice (+ 2 (if capture? 3 0) (count p))]]
+          (concat [[:choice (+ 2 #_(if capture? 3 0) (count p))]]
                   p
                   [[:fail-twice]]
                   (when capture? [[:push nil]])))))
@@ -105,9 +119,9 @@
   ; No need to really capture lookahead.
   (let [p (compile inner (assoc s :capture? false))]
     (into []
-          (concat [[:choice (+ 2 (if capture? 1 0) (count p))]]
+          (concat [[:choice (+ 2 #_(if capture? 1 0) (count p))]]
                   p
-                  (when capture? [[:push nil]]) ; But need a dummy if capturing.
+                  ;(when capture? [[:push nil]]) ; But need a dummy if capturing.
                   [[:back-commit 2]
                    [:fail]]))))
 
@@ -118,7 +132,7 @@
                    (when capture? [[:capture]]))))
 
 (defmethod compile :parka/nonterminal
-  [nonterminal]
+  [nonterminal _]
   [[:open-call nonterminal]])
 
 (defn compile-grammar [[[sym pat] & rs] labels code s]

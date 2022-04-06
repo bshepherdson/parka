@@ -87,16 +87,18 @@
     (is (= {:error :parka.machine.peg/expected-failure}
            (test-parse p "abd")))))
 
-#_(deftest test-optional
-  (let [p [(sut/opt "a") "b"]]
-    (is (= {:success "ab"} (test-parse p "ab")))
-    (is (= {:success "b"}  (test-parse p "b")))))
+(deftest test-?
+  (let [p [(sut/? "a") "b"]]
+    (is (= {:success {:parka/matches "b"}} (test-parse p "ab")))
+    (is (= {:success {:parka/matches "b"}}  (test-parse p "b")))))
 
-#_(deftest test-eof
+(deftest test-eof
   (let [base ["a" (sut/* \b)]
         eofd (conj base sut/eof)]
-    (is (= {:success "abbb"} (test-parse base "abbbc")))
-    (is (= {:success "abbb"} (test-parse eofd "abbb")))
+    (is (= {:success {:parka/matches ["a" ["b" "b" "b"]]}}
+           (test-parse base "abbbc")))
+    (is (= {:success {:parka/matches ["a" ["b" "b" "b"] nil]}}
+           (test-parse eofd "abbb")))
     (is (= {:error :parka.machine.peg/expected-failure}
            (test-parse eofd "abbbc")))))
 

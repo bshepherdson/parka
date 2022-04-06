@@ -18,7 +18,7 @@
 
   Once you have constructured your complete expression, call `compile` with it.
   The returned engine can be run by calling `parse`."
-  (:refer-clojure :exclude [+ * and compile not seq])
+  (:refer-clojure :exclude [+ * and compile keep not seq])
   (:require
     [parka.machine.compiler :as compiler]
     [parka.machine.peg :as engine]))
@@ -45,6 +45,12 @@
    :parka/action f
    :parka/inner  expr})
 
+(defn keep
+  "An alternative argument order for `action`, which is more convenient for
+  a short function like a keyword."
+  [f expr]
+  (action expr f))
+
 (defn *
   "Given an inner expression, returns an expression that attempts to match it 0
   or more times.
@@ -59,8 +65,13 @@
    Equivalent to `[expr (* expr)]`."
   [expr]
   (action [expr (* expr)]
-          (fn [{[x xs] :parka/matches}]
-            (into [x] xs))))
+          (fn [res]
+            (if (keyword? expr)
+              (let [x  (get res expr)
+                    xs (:parka/matches res)]
+                (into [x] xs))
+              (let [{[x xs] :parka/matches} res]
+                (into [x] xs))))))
 
 (defn one-of
   [chs]
@@ -81,12 +92,18 @@
   {:parka/type  :parka/not
    :parka/inner expr})
 
-(defn opt
+(defn ?
   "Given a parsing `expr`, matches 0 or 1 copies of it.
 
   Equivalent to `(alt [(and expr) expr] (not expr))`."
   [expr]
-  (alt [(and expr) expr] (not expr)))
+  (alt (action [(and expr) expr]
+               (fn [res]
+                 (let [res' (dissoc res :parka/matches)]
+                   (if (= {} res')
+                     (:parka/matches res)
+                     (first (vals res'))))))
+       (not expr)))
 
 (defn grammar
   "Given a map `rules` of `:label` to expression, and the `start` label, builds

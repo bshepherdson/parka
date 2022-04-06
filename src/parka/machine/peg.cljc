@@ -101,14 +101,16 @@
                                            :caps (:caps m))))))
 
 (defmethod exec :back-commit
-  ;; Moves PC by delta, pops a backtracking record from the stack, ignores its PC
-  ;; but moves the input to its position.
+  ;; Moves PC by delta, pops a backtracking record from the stack, ignores its
+  ;; PC but moves the input to its position. Uses its caps and captures, but
+  ;; pushes an extra nil as the value of this rule.
   [m [_ delta]]
   (let [tos (peek (:stack m))]
     (-> m
         (pc+ delta)
         (update :stack pop)
-        (assoc :pos (:pos tos)))))
+        (assoc :pos  (:pos tos)
+               :caps (conj (:caps tos) nil)))))
 
 (defmethod exec :fail
   [m [_ err]]
@@ -190,7 +192,6 @@
 
 (defmethod exec :apply-capture-2
   [{:keys [caps] :as m} [_ f]]
-  (prn caps)
   (let [tos    (peek caps)
         caps1  (pop  caps)
         nos    (peek caps1)
@@ -208,6 +209,7 @@
             :filename label
             :pos      0
             :caps     []}]
+    #_(prn (:pc m) (nth (:code m) (:pc m)) (:caps m))
     (if (:done? m)
       m
       (recur (exec m (nth (:code m) (:pc m)))))))
