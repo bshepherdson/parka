@@ -1,80 +1,88 @@
 (ns parka.json-test
   "Test that builds and exercises a JSON parser using this library."
   (:require
+    [clojure.string :as string]
     [clojure.test :refer [deftest is testing]]
     [parka.api :as p]))
 
 (def json-rules
-  {:start      (p/keep :json-value [:ws :json-value :ws p/eof])
+  {:start      (p/pick [1] [:ws :json-value :ws p/eof])
    :json-value (p/alt :array :object :null :bool :string :number)
-   :ws         (p/* (p/one-of " \t\r\n"))
+   :ws         (p/drop (p/* (p/one-of " \t\r\n")))
    :null       (p/action "null" (constantly nil))
    :bool       (p/action
                  (p/alt "true" "false")
                  #(= % "true"))
    :hex        (p/one-of "0123456789ABCDEFabcdef")
    :unicode    (p/action ["\\u" :hex :hex :hex :hex]
-                 (fn [{[a b c d] :hex}]
-                   (char (Long/parseLong (str a b c d) 16))))
+                 (fn [[_ a b c d]]
+                   (str (char (Long/parseLong (str a b c d) 16)))))
    :escaped    (p/action ["\\" (p/one-of "\"\\/nrbft")]
                  (fn [[_ v]]
                    (case v
-                     \n \newline
-                     \r \return
-                     \b \backspace
-                     \f \formfeed
-                     \t \tab
+                     "n" "\n"
+                     "r" "\r"
+                     "b" "\b"
+                     "f" "\f"
+                     "t" "\t"
                      v)))
-   :strchar    (p/alt :unicode :escaped [(p/not \") p/any])
-   :string     [\" (p/* :strchar) \"]
-   #_(p/stringify (p/pseq-at 1 "\""
-                                       (p/many-till :strchar "\"")))
-
+   :strchar    (p/alt :unicode :escaped (p/pick [1] [(p/not \") p/any]))
+   :string     (p/action [\" (p/* :strchar) \"]
+                         (comp string/join second))
    :pm         (p/one-of "+-")
-   :digits     (p/+ (p/one-of "0123456789"))
-   #_(p/stringify (p/many1 (p/span \0 \9)))
+   :digits     (p/str (p/+ (p/one-of "0123456789")))
    :number     (p/action
                  [(p/? :pm)
                   :digits
-                  (p/? (p/keep :digits ["." :digits]))
+                  (p/? (p/pick [1] ["." :digits]))
                   (p/? [#{\e \E}
-                        {:pm (p/? :pm)}
+                        (p/? :pm)
                         :digits])]
-                 (fn [res]
-                   (prn res)
-                   0
-                   #_(let [n (Integer/parseInt main)
-                         pos (if (or d e)
+                 (fn [[pm main decimal [_ em exp]]]
+                   (let [n (Integer/parseInt (string/join main))
+                         pos (if (or decimal exp)
                                (Double/parseDouble
                                  (str n
-                                      (if d (str "." d) "")
-                                      (if e (str "e" (or em "") e) "")))
+                                      (if decimal
+                                        (str "." decimal)
+                                        "")
+                                      (if exp
+                                        (str "e" (or em "") exp)
+                                        "")))
                                (Integer/parseInt main))]
-                     (if (= \- sign)
+                     (if (= "-" pm)
                        (- pos)
                        pos))))
 
-   :comma      [:ws "," :ws]
-   :object     (p/action [\{ :ws
-                          :key-value
-                          {:tail (p/* (p/keep :key-value [:comma :key-value]))}
-                          :ws \}]
-                 (fn [{:keys [key-value tail]}]
-                   (reduce (into {} key-value) tail)))
-   :key-value  (p/action
-                 [:string :ws ":" :ws :json-value]
-                 (fn [{:keys [string json-value]}]
-                   [string json-value]))
-   :array      (p/keep :array-guts [\[ :ws :array-guts :ws \]])
-   :array-guts (p/alt [:json-value
-                       {:tail (p/* (p/keep :json-value [:comma :json-value]))}]
-                      (p/and \]))})
-
-(defn test-parse [input]
-  (p/parse (p/compile (p/grammar json-rules :start)) "<test>" input))
+   :comma       [:ws "," :ws]
+   :object      (p/alt :empty-obj :full-obj)
+   :empty-obj   (p/action [\{ :ws \}] (constantly {}))
+   :full-obj    (p/pick [2] [\{ :ws :obj-guts :ws \}])
+   :obj-guts    (p/action [:key-value (p/* (p/pick [1] [:comma :key-value]))]
+                          (fn [[x xs]]
+                            (into {} (concat [x] xs))))
+   :key-value   (p/action
+                  [:string :ws ":" :ws :json-value]
+                  (fn [[k _ _ _ v]]
+                    [k v]))
+   :array       (p/pick [2] [\[ :ws :array-guts :ws \]])
+   :array-guts  (p/alt :full-array :empty-array)
+   :full-array  (p/action
+                 [:json-value (p/* (p/pick [1] [:comma :json-value]))]
+                 (fn [[x xs]]
+                   (into [x] xs)))
+   :empty-array (p/action
+                  (p/and \]) ; ws has already been consumed here.
+                  (constantly []))})
 
 (defn test-parse-from [sym input]
-  (p/parse (p/compile (p/grammar json-rules sym)) "<test>" input))
+  (let [result (p/parse (p/compile (p/grammar json-rules sym)) "<test>" input)]
+    (if (contains? result :success) ; nil is a valid result!
+      (:success result)
+      result)))
+
+(defn test-parse [input]
+  (test-parse-from :start input))
 
 (deftest test-number
   (is (= 1        (test-parse-from :number "1")))
@@ -100,15 +108,15 @@
     (is (= ""     (test-parse-from :string "\"\""))))
 
   (testing "escapes"
-    (is (= \\         (test-parse-from :strchar "\\\\")))
-    (is (= \"         (test-parse-from :strchar "\\\"")))
-    (is (= \newline   (test-parse-from :strchar "\\n")))
-    (is (= \return    (test-parse-from :strchar "\\r")))
-    (is (= \formfeed  (test-parse-from :strchar "\\f")))
-    (is (= \backspace (test-parse-from :strchar "\\b")))
-    (is (= \tab       (test-parse-from :strchar "\\t"))))
+    (is (= "\\"       (test-parse-from :strchar "\\\\")))
+    (is (= "\""       (test-parse-from :strchar "\\\"")))
+    (is (= "\n"       (test-parse-from :strchar "\\n")))
+    (is (= "\r"       (test-parse-from :strchar "\\r")))
+    (is (= "\f"       (test-parse-from :strchar "\\f")))
+    (is (= "\b"       (test-parse-from :strchar "\\b")))
+    (is (= "\t"       (test-parse-from :strchar "\\t"))))
   (testing "unicode"
-    (is (= \uBEEF (test-parse-from :strchar "\\ubeef"))))
+    (is (= "\uBEEF"   (test-parse-from :strchar "\\ubeef"))))
   (testing "strings with escapes"
     (is (= "\n"   (test-parse-from :string "\"\\n\"")))
     (is (= "\\"   (test-parse-from :string "\"\\\\\"")))))
@@ -155,5 +163,6 @@
   ; This times 100 runs.
   (time (test-parse (slurp "./inspector-json-payload.json")))
   (time (test-parse (slurp "./pp.json")))
+
   )
 

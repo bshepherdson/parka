@@ -38,14 +38,14 @@
     [[:mark] [:any] [:capture]]
     [[:any]]))
 
-(defn- append-seq-result [label caps value]
+#_(defn- append-seq-result [label caps value]
   (let [old (get caps label)]
     (cond
       (nil?    old) (assoc caps label value)
       (vector? old) (update caps label conj value)
       :else         (assoc caps label [old value]))))
 
-(defn- compile-seq-item-cap
+#_(defn- compile-seq-item-cap
   "Compiles a single item inside a seq, when capturing."
   [p s]
   (cond
@@ -69,7 +69,7 @@
                   f            (partial append-seq-result :parka/matches)]
               (into compiled [[:apply-capture-2 f]]))))
 
-(defn- compile-seq-item-drop
+#_(defn- compile-seq-item-drop
   [p s]
   (prn "CSID" p)
   (if (and (map? p) (not (:parka/type p)))
@@ -79,14 +79,13 @@
 (defmethod compile :parka/seq
   [ps {:keys [nested? capture?] :as s}]
   ;; If nested, don't push a new value.
-  (let [pre (cond
-              (and capture? nested?) nil
-              capture?               [[:push {}]]
-              :else                  nil)
+  (let [pre (when (and capture? (not nested?))
+              [[:push []]])
         s'  (dissoc s :nested?)
-        compiled (if capture?
-                   (mapcat #(compile-seq-item-cap  % s') ps)
-                   (mapcat #(compile-seq-item-drop % s') ps))]
+        compiled (mapcat (if capture?
+                           #(into (compile % s') [[:apply-capture-2 conj]])
+                           #(compile % s'))
+                         ps)]
     (into [] (concat pre compiled))))
 
 (defn- compile-alt [alts s]

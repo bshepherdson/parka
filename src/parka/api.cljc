@@ -18,8 +18,9 @@
 
   Once you have constructured your complete expression, call `compile` with it.
   The returned engine can be run by calling `parse`."
-  (:refer-clojure :exclude [+ * and compile keep not seq])
+  (:refer-clojure :exclude [+ * and compile drop not seq str])
   (:require
+    [clojure.string :as string]
     [parka.machine.compiler :as compiler]
     [parka.machine.peg :as engine]))
 
@@ -45,11 +46,26 @@
    :parka/action f
    :parka/inner  expr})
 
-(defn keep
-  "An alternative argument order for `action`, which is more convenient for
-  a short function like a keyword."
-  [f expr]
-  (action expr f))
+(defn pick
+  "Given a `path` like `get-in` and a parsing `expr`, does
+  `(get-in result path)` on the result of the expression.
+  This is useful for extracting a useful part of a noisy expression, such as
+  ignoring white space and brackets."
+  [path expr]
+  (action expr #(get-in % path)))
+
+(defn drop
+  "Parses an expr but drops its result, returning nil instead."
+  [expr]
+  (action expr (constantly nil)))
+
+(defn str
+  "Given a parsing `expr` that returns a list of strings, this concatenates the
+  strings together.
+  For example `:digit (p/str (p/+ (p/one-of \"0123456789\")))` returns the
+  digit converted to a string."
+  [expr]
+  (action expr string/join))
 
 (defn *
   "Given an inner expression, returns an expression that attempts to match it 0
@@ -65,13 +81,8 @@
    Equivalent to `[expr (* expr)]`."
   [expr]
   (action [expr (* expr)]
-          (fn [res]
-            (if (keyword? expr)
-              (let [x  (get res expr)
-                    xs (:parka/matches res)]
-                (into [x] xs))
-              (let [{[x xs] :parka/matches} res]
-                (into [x] xs))))))
+          (fn [[x xs]]
+            (into [x] xs))))
 
 (defn one-of
   [chs]
@@ -98,11 +109,7 @@
   Equivalent to `(alt [(and expr) expr] (not expr))`."
   [expr]
   (alt (action [(and expr) expr]
-               (fn [res]
-                 (let [res' (dissoc res :parka/matches)]
-                   (if (= {} res')
-                     (:parka/matches res)
-                     (first (vals res'))))))
+               second)
        (not expr)))
 
 (defn grammar

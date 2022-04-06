@@ -1,4 +1,8 @@
 {:paths ["src" "resources"]
  :deps {}
  :aliases {:test {:extra-paths ["test"]
-                  :extra-deps {}}}}
+                  :extra-deps {}}
+           :prof {:extra-paths ["bench"]
+                  :jvm-opts ["-Djdk.attach.allowAttachSelf=true"]
+                  :extra-deps
+                  {com.clojure-goes-fast/clj-async-profiler {:mvn/version "0.5.1"}}}}}
