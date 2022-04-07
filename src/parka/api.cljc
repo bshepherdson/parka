@@ -18,7 +18,7 @@
 
   Once you have constructured your complete expression, call `compile` with it.
   The returned engine can be run by calling `parse`."
-  (:refer-clojure :exclude [+ * and compile drop not seq str])
+  (:refer-clojure :exclude [+ * and compile drop not str])
   (:require
     [clojure.string :as string]
     [parka.errors :as errors]
@@ -26,12 +26,6 @@
     [parka.machine.peg :as engine]))
 
 ;;;; Parsing expression builders
-(defn seq
-  "Runs a sequence of parsers in order, failing if any of them fail.
-  Passing a vector of parsers is an equivalent shorthand."
-  [& exprs]
-  (vec exprs))
-
 (defn alt
   "Attempts each expression in order. When one matches, the `alt` is done.
   If all expressions fail, so does the `alt`."
