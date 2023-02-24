@@ -4,6 +4,11 @@
     [clojure.test :refer [deftest is testing]]
     [parka.api :as p]))
 
+; START HERE: An infinite loop somewhere. Not sure what's causing it but my
+; brain is tired. Perhaps I should write the debugging info + visualization I
+; was pondering over? It'll help debug the engine and also any difficult
+; parsers.
+
 (def math-rules
   {:start    (p/pick [0] [:expr p/eof])
    :expr     (p/alt (p/action
@@ -27,6 +32,10 @@
    :decimal  (p/action (p/+ :digit)
                        #(Integer/parseInt (string/join %)))
    :digit    (p/one-of "0123456789")})
+
+(comment
+  (p/parse (p/compile (p/grammar math-rules :number)) "<test>" "123")
+  )
 
 (defn test-parse [s]
   (p/parse (p/compile (p/grammar math-rules :start)) "<test>" s))

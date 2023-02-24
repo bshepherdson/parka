@@ -12,5 +12,5 @@
     (prof/stop {})))
 
 (comment
-  (profile-pretty-sample)
+  (time (profile-pretty-sample))
   )

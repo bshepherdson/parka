@@ -6,7 +6,7 @@
     [parka.errors :as errs]))
 
 (defmulti compile
-  (fn [pat _]
+  (fn [pat x]
     (cond
       (map?     pat) (:parka/type pat)
       (keyword? pat) :parka/nonterminal
@@ -14,7 +14,7 @@
       (string?  pat) :parka/string
       (vector?  pat) :parka/seq
       (set?     pat) :parka/set
-      :else (throw (ex-info "bad compile pattern" {:value pat})))))
+      :else (throw (ex-info "bad compile pattern" {:value [pat x]})))))
 
 (defn compile-expr [p]
   (into (compile p {:capture? true}) [[:end]]))
@@ -137,7 +137,9 @@
 (defn compile-grammar [[[sym pat] & rs] labels code s]
   (let [compiled (compile pat s)
         labels'  (assoc labels sym (count code))
-        code'    (into code (concat compiled [[:return]]))]
+        code'    (into code (concat [[:memo sym]]
+                                    compiled
+                                    [[:return-memo]]))]
     (if (empty? rs)
       [labels' code']
       (recur rs labels' code' s))))

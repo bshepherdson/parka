@@ -54,13 +54,31 @@
   [expr]
   (action expr (constantly nil)))
 
+(defn- stringify
+  "Tries to flatten a nested structure into a single string.
+  Chars are turned into strings, lists are recursively converted, then concated.
+  Nils are ignored."
+  [x]
+  (cond
+    (nil? x)     ""
+    (string? x)  x
+    (seqable? x) (string/join (map stringify x))
+    :else        (clojure.core/str x)))
+
+(comment
+  (= "abc" (stringify "abc"))
+  (= "abc" (stringify [\a \b \c]))
+  (= "abc" (stringify [\a ["bc"]]))
+  (= "abc" (stringify [[[\a nil [nil nil "bc" ""] nil]]]))
+  )
+
 (defn str
   "Given a parsing `expr` that returns a list of strings, this concatenates the
   strings together.
   For example `:digit (p/str (p/+ (p/one-of \"0123456789\")))` returns the
   digit converted to a string."
   [expr]
-  (action expr string/join))
+  (action expr stringify))
 
 (defn *
   "Given an inner expression, returns an expression that attempts to match it 0
@@ -85,6 +103,7 @@
 
 (defn and
   "Positive look-ahead. Attempts to parse `expr`, failing if `expr` fails.
+  Returns nil if parsing `expr` succeeds.
   Either way, `(and expr)` consumes no input."
   [expr]
   {:parka/type  :parka/and
@@ -93,6 +112,7 @@
 (defn not
   "Negative look-ahead. Attempts to parse `expr`, failing if `expr` passes and
   passing if `expr` fails.
+  Returns nil if parsing `expr` fails (so the `not` succeeds).
   Either way, `(not expr)` consumes no input."
   [expr]
   {:parka/type  :parka/not

@@ -93,8 +93,7 @@
   (is (= 0.02     (test-parse-from :number "0.02")))
   (is (= 200.0    (test-parse-from :number "0.02e4")))
   (is (= 123.4e-2 (test-parse-from :number "123.4e-2")))
-  (is (= 0.12     (test-parse-from :number "12e-2")))
-  )
+  (is (= 0.12     (test-parse-from :number "12e-2"))))
 
 (deftest test-ws
   (is (= nil (test-parse-from :ws "   \t\t \n   \t"))))
@@ -155,14 +154,4 @@
                        "def"  "yolo"
                        "asdf" nil}]
          (test-parse "  [ 1  ,false,null , {  \"abc\"  :true, \"def\": \"yolo\", \"asdf\": null  }  ]  "))))
-
-
-(comment
-  ; Running this JSON parser on the 7MB payload used by
-  ; https://github.com/GoogleChromeLabs/json-parse-benchmark
-  ; This times 100 runs.
-  (time (test-parse (slurp "./inspector-json-payload.json")))
-  (time (test-parse (slurp "./pp.json")))
-
-  )
 

@@ -2,15 +2,6 @@
   (:require
     [parka.errors :as errs]))
 
-
-;;; The state is
-;;; {:pc   n
-;;; :code  [...]
-;;; :stack [...]
-;;; :input "str"
-;;; :pos   i
-;;; :caps  []}
-
 (defn- head [^clojure.lang.IPersistentMap m]
   (let [input ^String (.valAt m :input)
         pos   ^long   (.valAt m :pos)]
@@ -32,17 +23,25 @@
 (defn- abort [m err]
   (assoc m :done? true :error err))
 
+(defn- cache-miss [err pos m [_ sym]]
+  (assoc-in m [:cache pos sym] {::cached-failure true :error err}))
 
 (defn- fail
-  "Drain the stack until we find a `[pc' pos' caps']` pair; set these values."
+  "Drain the stack until we find a `{pc' pos' caps'...}` map; restore these
+  saved values.
+  We check the current and saved memos, any current-only memos get cached
+  failures added."
   [m err]
   (let [tos (peek (:stack m))]
     (if (nil? tos)
       (abort m err) ; We've run out of stack - a failed parse.
       (let [m' (update m :stack pop)]
         (if (map? tos)
-          (let [{:keys [pc pos caps]} tos]
-            (assoc m' :pc pc :pos pos :caps caps))
+          (let [{:keys [caps memos pc pos]} tos
+                live-memos (into #{} memos)
+                dead-memos (filter (complement live-memos) (:memos m))]
+            (-> (reduce (partial cache-miss err pos) m' dead-memos)
+                (assoc :pc pc :pos pos :caps caps :memos memos)))
           (recur m' err))))))
 
 (defmulti exec (fn [_ [op]] op))
@@ -59,28 +58,23 @@
     (fail m (errs/parse-error m "unexpected EOF"))))
 
 (defmethod exec :choice
-  [{:keys [pos pc caps] :as m} [_ delta offset]]
+  [{:keys [memos pos pc caps] :as m} [_ delta offset]]
   (-> m
       pc+
-      (update :stack conj {:pc   (+ pc delta)
-                           :pos  (- pos (or offset 0))
-                           :caps caps})))
+      (update :stack conj {:pc    (+ pc delta)
+                           :pos   (- pos (or offset 0))
+                           :caps  caps
+                           :memos memos})))
 
 (defmethod exec :jump
   [m [_ delta]]
   (pc+ m delta))
 
 (defmethod exec :call
-  [{:keys [pc pos] :as m} [_ delta]]
+  [{:keys [pc] :as m} [_ delta]]
   (-> m
       (pc+ delta)
       (update :stack conj (inc pc))))
-
-(defmethod exec :return
-  [{:keys [stack] :as m} _]
-  (-> m
-      (assoc :pc (peek stack))
-      (update :stack pop)))
 
 (defmethod exec :commit
   [m [_ delta]]
@@ -108,8 +102,9 @@
     (-> m
         (pc+ delta)
         (update :stack pop)
-        (assoc :pos  (:pos tos)
-               :caps (conj (:caps tos) nil)))))
+        (assoc :pos   (:pos tos)
+               :caps  (conj (:caps tos) nil)
+               :memos (:memos tos)))))
 
 (defmethod exec :fail
   [m [_ err]]
@@ -200,16 +195,80 @@
         pc+
         (assoc :caps (conj caps2 tos')))))
 
+;;; Memoization scheme:
+;;; At the tops of each expression in a grammar, the instruction  [:memo sym]
+;;; is generated. On exiting the expression successfully, it runs [:return-memo]
+;;; to signal the end.
+;;;
+;;; The bookkeeping is done with a stack of memoization state, similar to
+;;; captures. [:memo sym] pushes [pos sym] pairs.
+;;; - The cache of completed memoizations is permanent - it doesn't change for a
+;;;   particular input string.
+;;; - However the stack of memoizations is saved and restored by :choice.
+(defn- return
+  [{:keys [stack] :as m}]
+  (-> m
+      (assoc :pc (peek stack))
+      (update :stack pop)))
+
+(defmethod exec :return
+  [m _]
+  (return m))
+
+(defmethod exec :memo
+  [{:keys [cache pos] :as m} [_ sym]]
+  ; TODO This doesn't let grammars nest - there's only one cache and they can
+  ; collide.
+  (let [cached (get-in cache [pos sym])]
+    ; There are three cases here: cached success, cached failure, not cached.
+    (cond
+      (::cached-failure cached)
+      (fail m (:error cached))
+
+      cached
+      (-> m
+          (update :caps conj (:result cached))
+          (assoc :pos (:pos cached))
+          return)
+
+      :else
+      (-> m
+          pc+
+          (update :memos conj [pos sym])))))
+
+(defmethod exec :return-memo
+  [{:keys [caps memos pos] :as m} _]
+  (let [[start sym] (peek memos)]
+    #_(prn "return-memo" start sym caps)
+    (-> m
+        (update :memos pop)
+        (assoc-in [:cache start sym] {:pos pos :result (peek caps)})
+        return)))
+
 (defn run [code label text]
-  (loop [m {:pc       0
-            :code     code
-            :stack    []
-            :input    text
-            :filename label
-            :pos      0
-            :caps     []}]
-    #_(prn (:pc m) (nth (:code m) (:pc m)) (:caps m))
-    (if (:done? m)
-      m
-      (recur (exec m (nth (:code m) (:pc m)))))))
+  (let [loops (atom 0)]
+    (loop [m {:pc       0
+              :code     code
+              :stack    []
+              :input    text
+              :filename label
+              :pos      0
+              :memos    []  ; Stack of [pos :rule] pairs for memoization.
+              :cache    {}  ; {pos {:rule {:pos ... :result ...}}}
+              :caps     []}]
+      ;(println "================================")
+      ;(prn (:pc m) (nth (:code m) (:pc m)))
+      ;(prn (subs (:input m) (:pos m)))
+      ;(println "Memos:")
+      ;(doseq [[pos rule] (:memos m)]
+      ;  (printf "  %-4d: %s\n" pos (str rule)))
+      ;(prn (:cache m))
+      ;(println "(enter)")
+      ;(read-line)
+
+      #_(when (zero? (mod (swap! loops inc) 1000000))
+          (prn (->> m :stack (filter map?) first :pos)))
+      (if (:done? m)
+        m
+        (recur (exec m (nth (:code m) (:pc m))))))))
 
