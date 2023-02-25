@@ -1,7 +1,6 @@
 (ns parka.machine.peg
   (:require
-    [parka.errors :as errs]))
-
+   [parka.errors :as errs]))
 
 ;;; The state is
 ;;; {:pc   n
@@ -31,7 +30,6 @@
 
 (defn- abort [m err]
   (assoc m :done? true :error err))
-
 
 (defn- fail
   "Drain the stack until we find a `[pc' pos' caps']` pair; set these values."

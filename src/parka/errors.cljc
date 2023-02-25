@@ -1,6 +1,6 @@
 (ns parka.errors
   (:require
-    [clojure.string :as str]))
+   [clojure.string :as str]))
 
 (defn expectations [err]
   (-> err ex-data :parka/expectations))

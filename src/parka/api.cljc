@@ -20,10 +20,10 @@
   The returned engine can be run by calling `parse`."
   (:refer-clojure :exclude [+ * and compile drop not str])
   (:require
-    [clojure.string :as string]
-    [parka.errors :as errors]
-    [parka.machine.compiler :as compiler]
-    [parka.machine.peg :as engine]))
+   [clojure.string :as string]
+   [parka.errors :as errors]
+   [parka.machine.compiler :as compiler]
+   [parka.machine.peg :as engine]))
 
 ;;;; Parsing expression builders
 (defn alt
@@ -50,14 +50,15 @@
   (action expr #(get-in % path)))
 
 (defn drop
-  "Parses an expr but drops its result, returning nil instead."
+  "Parses an expr without capturing any results. Returns nil instead."
   [expr]
-  (action expr (constantly nil)))
+  {:parka/type  :parka/drop
+   :parka/inner expr})
 
 (defn str
   "Given a parsing `expr` that returns a list of strings, this concatenates the
   strings together.
-  For example `:digit (p/str (p/+ (p/one-of \"0123456789\")))` returns the
+  For example `:digit (p/str (p/+ (set \"0123456789\")))` returns the
   digit converted to a string."
   [expr]
   (action expr string/join))
@@ -78,10 +79,6 @@
   (action [expr (* expr)]
           (fn [[x xs]]
             (into [x] xs))))
-
-(defn one-of
-  [chs]
-  (into #{} chs))
 
 (defn and
   "Positive look-ahead. Attempts to parse `expr`, failing if `expr` fails.
@@ -107,6 +104,21 @@
                second)
        (not expr)))
 
+(defn span
+  "Given two characters, returns a parser that will match any single character in
+  the inclusive range from the first to the second."
+  [a b]
+  (->> (range (int a) (inc (int b)))
+       (map char)
+       set))
+
+(defn ic
+  "Wraps an inner parser, and converts it (recursively) to make all character matches
+  case-insensitive."
+  [inner]
+  {:parka/type  :parka/ic
+   :parka/inner inner})
+
 (defn grammar
   "Given a map `rules` of `:label` to expression, and the `start` label, builds
   a grammar composed of many named expressions.
@@ -120,6 +132,12 @@
 (def any
   "Matches any single character. Not a function, just a constant."
   {:parka/type :parka/any})
+
+(defn any-but
+  "Matches any single character which is *not* matched by the provided parser.
+  Equivalent to `(pick [1] [(not p) any])`."
+  [p]
+  (pick [1] [(not p) any]))
 
 (def eof
   "Matches end-of-file. Useful for ensuring the entire input is consumed."
@@ -138,20 +156,11 @@
   Returns either `{:success \"string matched\"}` or `{:error ...}`."
   [engine source text]
   (let [{:keys [error caps] :as res} (engine/run engine source text)]
-    (when (not= 1 (count caps))
-      (throw (ex-info "bad capture!" res)))
+    (clojure.pprint/pprint res)
     (cond
       (clojure.core/and
-        error (keyword? error)) {:error error}
-      error        {:error (update error :parka/loc errors/pretty-location)}
-      :else        {:success (peek caps)})))
-
-
-(comment
-  (parse (compile [\a \b \c
-                   {:parka/type :parka/not
-                    :parka/inner {:parka/type :parka/any}}])
-         "<test>"
-         "abc")
-  )
-
+       error
+       (keyword? error))    {:error error}
+      error                 {:error (update error :parka/loc errors/pretty-location)}
+      (not= 1 (count caps)) (throw (ex-info "bad capture!" res))
+      :else                 {:success (peek caps)})))

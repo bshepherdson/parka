@@ -3,18 +3,19 @@
   instructions."
   (:refer-clojure :exclude [compile])
   (:require
-    [parka.errors :as errs]))
+   [clojure.string :as str]))
 
-(defmulti compile
-  (fn [pat _]
-    (cond
-      (map?     pat) (:parka/type pat)
-      (keyword? pat) :parka/nonterminal
-      (char?    pat) :parka/char
-      (string?  pat) :parka/string
-      (vector?  pat) :parka/seq
-      (set?     pat) :parka/set
-      :else (throw (ex-info "bad compile pattern" {:value pat})))))
+(defn- parser-type [pat]
+  (cond
+    (map?        pat) (:parka/type pat)
+    (keyword?    pat) :parka/nonterminal
+    (char?       pat) :parka/char
+    (string?     pat) :parka/string
+    (set?        pat) :parka/set
+    (sequential? pat) :parka/seq
+    :else (throw (ex-info "bad compile pattern" {:value pat}))))
+
+(defmulti compile (fn [p _] (parser-type p)))
 
 (defn compile-expr [p]
   (into (compile p {:capture? true}) [[:end]]))
@@ -39,52 +40,50 @@
     [[:any]]))
 
 #_(defn- append-seq-result [label caps value]
-  (let [old (get caps label)]
-    (cond
-      (nil?    old) (assoc caps label value)
-      (vector? old) (update caps label conj value)
-      :else         (assoc caps label [old value]))))
+    (let [old (get caps label)]
+      (cond
+        (nil?    old) (assoc caps label value)
+        (vector? old) (update caps label conj value)
+        :else         (assoc caps label [old value]))))
 
 #_(defn- compile-seq-item-cap
-  "Compiles a single item inside a seq, when capturing."
-  [p s]
-  (cond
+    "Compiles a single item inside a seq, when capturing."
+    [p s]
+    (cond
     ;; If it's a keyword, use the terminal name as the label.
-    (keyword? p) (let [compiled (compile p s)]
-                   (into (compile p s)
-                         [[:apply-capture-2 (partial append-seq-result p)]]))
+      (keyword? p) (let [compiled (compile p s)]
+                     (into (compile p s)
+                           [[:apply-capture-2 (partial append-seq-result p)]]))
 
     ;; If it's a vector, it's just inlined with the same logic.
-    (vector? p)  (compile p (assoc s :nested? true))
+      (vector? p)  (compile p (assoc s :nested? true))
 
     ;; For a map with one value, take it as {label target}.
-    (and (map? p) (= 1 (count p)))
-    (let [[label inner] (first p)
-          compiled      (compile inner s)
-          f             (partial append-seq-result label)]
-      (into compiled [[:apply-capture-2 f]]))
+      (and (map? p) (= 1 (count p)))
+      (let [[label inner] (first p)
+            compiled      (compile inner s)
+            f             (partial append-seq-result label)]
+        (into compiled [[:apply-capture-2 f]]))
 
     ;; For any other parser, use the key :parka/matches
-    :else   (let [compiled     (compile p s)
-                  f            (partial append-seq-result :parka/matches)]
-              (into compiled [[:apply-capture-2 f]]))))
+      :else   (let [compiled     (compile p s)
+                    f            (partial append-seq-result :parka/matches)]
+                (into compiled [[:apply-capture-2 f]]))))
 
 #_(defn- compile-seq-item-drop
-  [p s]
-  (prn "CSID" p)
-  (if (and (map? p) (not (:parka/type p)))
-    (compile (first (vals p)) s)
-    (compile p s)))
+    [p s]
+    (prn "CSID" p)
+    (if (and (map? p) (not (:parka/type p)))
+      (compile (first (vals p)) s)
+      (compile p s)))
 
 (defmethod compile :parka/seq
-  [ps {:keys [nested? capture?] :as s}]
-  ;; If nested, don't push a new value.
-  (let [pre (when (and capture? (not nested?))
+  [ps {:keys [capture?] :as s}]
+  (let [pre (when capture?
               [[:push []]])
-        s'  (dissoc s :nested?)
         compiled (mapcat (if capture?
-                           #(into (compile % s') [[:apply-capture-2 conj]])
-                           #(compile % s'))
+                           #(into (compile % s) [[:apply-capture-2 conj]])
+                           #(compile % s))
                          ps)]
     (into [] (concat pre compiled))))
 
@@ -105,22 +104,21 @@
 
 (defmethod compile :parka/not
   [{:parka/keys [inner]} {:keys [capture?] :as s}]
-  ; No need to really capture lookahead.
+  ; No need to capture lookahead.
   (let [p (compile inner (assoc s :capture? false))]
     (into []
-          (concat [[:choice (+ 2 #_(if capture? 3 0) (count p))]]
+          (concat [[:choice (+ 2 (count p))]]
                   p
                   [[:fail-twice]]
                   (when capture? [[:push nil]])))))
 
 (defmethod compile :parka/and
-  [{:parka/keys [inner]} {:keys [capture?] :as s}]
-  ; No need to really capture lookahead.
+  [{:parka/keys [inner]} s]
+  ; No need to capture lookahead.
   (let [p (compile inner (assoc s :capture? false))]
     (into []
-          (concat [[:choice (+ 2 #_(if capture? 1 0) (count p))]]
+          (concat [[:choice (+ 2 (count p))]]
                   p
-                  ;(when capture? [[:push nil]]) ; But need a dummy if capturing.
                   [[:back-commit 2]
                    [:fail]]))))
 
@@ -174,8 +172,70 @@
                   (when capture? [[:apply-capture-2 conj]])
                   [[:partial-commit (- (+ cap-width (count p)))]]))))
 
+(defmethod compile :parka/drop
+  [{:parka/keys [inner]} {:keys [capture?] :as s}]
+  (into [] (concat (compile inner (assoc s :capture? false))
+                   (when capture? [[:push nil]]))))
+
 (defmethod compile :parka/action
   [{:parka/keys [inner action]} {:keys [capture?] :as s}]
   (into [] (concat (compile inner s)
                    (when capture? [[:apply-capture-1 action]]))))
 
+;; ------------------------- Caes-insensitive --------------------------------
+(defmulti ^:private decase
+  "Converts a parser to be case-insensitive, depending on its type."
+  parser-type)
+
+(defmethod compile :parka/ic
+  [{:parka/keys [inner]} s]
+  (compile (decase inner) s))
+
+;; Many of the parsers are transparent, and just need to update :parka/inner.
+(defmethod decase :default [p]
+  (update p :parka/inner decase))
+
+(defmethod decase :parka/alt [{:parka/keys [alts] :as p}]
+  (assoc p :parka/alts (map decase alts)))
+
+;; Nothing to do for any.
+(defmethod decase :parka/any [p]
+  p)
+
+(defmethod decase :parka/char [ch]
+  (let [lc (first (str/lower-case ch))
+        uc (first (str/upper-case ch))
+        cs #{lc uc}]
+    (if (= (count cs) 1)
+      ch
+      cs)))
+
+(defmethod decase :parka/grammar [g]
+  (update g :parka/rules update-vals decase))
+
+(defmethod decase :parka/ic [{:parka/keys [inner]}]
+  ;; No need to nest ICs; they can be unwrapped.
+  (decase inner))
+
+(defmethod decase :parka/nonterminal [nt]
+  ;; With this kind of indirection, we can't easily do this, so just throw at
+  ;; construction time.
+  (throw (ex-info "(ic ...) can't (recursively) contain a :nonterminal"
+                  {:nonterminal nt})))
+
+(defmethod decase :parka/seq [s]
+  (map decase s))
+
+(defmethod decase :parka/set [chs]
+  (let [lc (map str/lower-case chs)
+        uc (map str/upper-case chs)]
+    (->> (concat lc uc)
+         (map first) ; str/lower-case converts to a string
+         set)))
+
+(defmethod decase :parka/string [s]
+  ;; This one is a bit tricky. Map decase over the individual characters, then wrap it
+  ;; as an action with str/join.
+  {:parka/type   :parka/action
+   :parka/inner  (map decase s)
+   :parka/action str/join})

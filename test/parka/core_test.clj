@@ -1,8 +1,7 @@
 (ns parka.core-test
   (:require
-    [clojure.test :refer [deftest is testing]]
-    [parka.api :as sut]))
-
+   [clojure.test :refer [deftest is testing]]
+   [parka.api :as sut]))
 
 (defn- test-parse [p input]
   (sut/parse (sut/compile p) "<test>" input))
@@ -22,10 +21,10 @@
          (test-parse "foo" "for"))))
 
 #_(deftest test-lit-ic
-  (is (= "foo" (test-parse (sut/lit-ic "foo") "foo")))
-  (is (= "foo" (test-parse (sut/lit-ic "foo") "FOO")))
-  (is (thrown-with-msg? Exception #"expected literal 'foo'"
-                        (test-parse (sut/lit "foo") "for"))))
+    (is (= "foo" (test-parse (sut/lit-ic "foo") "foo")))
+    (is (= "foo" (test-parse (sut/lit-ic "foo") "FOO")))
+    (is (thrown-with-msg? Exception #"expected literal 'foo'"
+                          (test-parse (sut/lit "foo") "for"))))
 
 (deftest test-sets
   (is (= {:success "f"} (test-parse #{\f} "f")))
@@ -34,7 +33,7 @@
          (test-parse #{\a \b \c} "f"))))
 
 (deftest test-one-of
-  (let [p (sut/one-of "abc")]
+  (let [p (set "abc")]
     (is (= {:success "a"} (test-parse p "a")))
     (is (= {:success "b"} (test-parse p "b")))
     (is (= {:success "c"} (test-parse p "c")))
@@ -66,8 +65,8 @@
 
   (testing "backtracking sequences"
     (let [p (sut/alt
-              ["0x" (sut/* (sut/one-of "0123456789abcdefABCDEF"))]
-              (sut/* (sut/one-of "0123456789")))]
+             ["0x" (sut/* (set "0123456789abcdefABCDEF"))]
+             (sut/* (set "0123456789")))]
       (is (= {:success ["1" "2"]}
              (test-parse p "12")))
       (is (= {:success ["0x" ["1" "2" "a" "B" "3"]]}
@@ -104,76 +103,78 @@
     (is (= {:error :parka.machine.peg/expected-failure}
            (test-parse eofd "abbbc")))))
 
-#_(deftest test-span
+(deftest test-span
   (let [p (sut/span \a \z)]
-    (is (= \d (test-parse p "d")))
-    (is (= \a (test-parse p "a")))
-    (is (= \z (test-parse p "z")))
-    (is (thrown-with-msg?
-          Exception #"expected character in range a to z; found A"
-          (test-parse p "A")))))
+    (is (= {:success "d"} (test-parse p "d")))
+    (is (= {:success "a"} (test-parse p "a")))
+    (is (= {:success "z"} (test-parse p "z")))
+    (is {:error :parka.machine.peg/expected-failure}
+        (test-parse p "A"))))
 
-#_(deftest test-many-min
-  (let [p (sut/many-min 3 (sut/alt (sut/lit "_")
-                                   (sut/span \a \z)))]
-    (is (= [\a \b "_" \c] (test-parse p "ab_c")))
-    (is (thrown-with-msg? Exception #"minimum 3" (test-parse p "ab")))))
+(deftest case-insensitive-test
+  (testing "single characters"
+    (let [p (sut/ic \a)]
+      (is (= {:success "a"} (test-parse p "a")))
+      (is (= {:success "A"} (test-parse p "A")))
+      (is (= {:error #:parka{:parse-error true
+                             :loc "<test> line 1 col 0"
+                             :message "failed expectation",
+                             :expectations #{\A \a}}}
+             (test-parse p "D")))
+      (is (= {:success ["a" "a" "A" "A" "a"]}
+             (test-parse (sut/* p) "aaAAa")))))
 
-#_(deftest test-many-drop
-  (is (= nil (test-parse (sut/many-drop (sut/one-of " \t\r\n"))
-                         "   \t\t  \n\t\t  ")))
-  (is (= ["a" nil "b"]
-         (test-parse (sut/pseq
-                       (sut/lit "a")
-                       (sut/many-drop (sut/one-of " \t\r\n"))
-                       (sut/lit "b"))
-                     "a   \t\t  \n\t\t  b"))))
+  (testing "set of characters"
+    (let [p (sut/ic (set "abc"))]
+      (is (= {:success "a"} (test-parse p "a")))
+      (is (= {:success "A"} (test-parse p "A")))
+      (is (= {:success "b"} (test-parse p "b")))
+      (is (= {:success "B"} (test-parse p "B")))
+      (is (= {:success "c"} (test-parse p "c")))
+      (is (= {:success "C"} (test-parse p "C")))
+      (is (= {:error #:parka{:parse-error true
+                             :loc "<test> line 1 col 0"
+                             :message "failed expectation",
+                             :expectations #{\A \a \B \b \C \c}}}
+             (test-parse p "D")))
+      (is (= {:success ["b" "a" "C" "A" "b"]}
+             (test-parse (sut/* p) "baCAb")))))
 
-#_(deftest test-sep-by
-  (let [p (sut/sep-by (sut/lit "a") (sut/lit "b"))]
-    (is (= [] (test-parse p "")))
-    (is (= ["a"] (test-parse p "a")))
-    (is (= ["a" "a"] (test-parse p "aba")))
-    (is (= ["a" "a" "a" "a"] (test-parse p "abababa")))
-    (is (= {:pos 3 :value ["a" "a"]}
-           (test-partial p "abab")))
-    (is (= {:pos 0 :value []}
-           (test-partial p "bb")))))
+  (testing "string literals"
+    (let [p (sut/ic "abc")]
+      (is (= {:success "abc"} (test-parse p "abc")))
+      (is (= {:success "ABC"} (test-parse p "ABC")))
+      (is (= {:success "aBc"} (test-parse p "aBc")))
+      (is (= {:success "ABc"} (test-parse p "ABc")))
+      (is (= {:success "AbC"} (test-parse p "AbC")))
+      (is (= {:success "abC"} (test-parse p "abC")))
+      (is (= {:error #:parka{:parse-error true
+                             :loc "<test> line 1 col 2"
+                             :message "failed expectation"
+                             :expectations #{\C \c}}}
+             (test-parse p "AbD")))
+      (is (= {:success ["abC" "ABC" "abc" "Abc"]}
+             (test-parse (sut/* p) "abCABCabcAbc")))
+      (is (= {:success []} (test-parse (sut/* p) "")))))
 
-#_(deftest test-sep-by1
-  (let [p (sut/sep-by1 (sut/lit "a") (sut/lit "b"))]
-    (is (thrown-with-msg? Exception #"expected at least 1:"
-                          (test-parse p "")))
-    (is (= ["a"] (test-parse p "a")))
-    (is (= ["a" "a"] (test-parse p "aba")))
-    (is (= ["a" "a" "a" "a"] (test-parse p "abababa")))
-    (is (= {:pos 3 :value ["a" "a"]}
-           (test-partial p "abab")))))
+  (testing "alts"
+    (let [p (sut/ic [(sut/alt "true"
+                              "false"
+                              (sut/str (sut/* (sut/span \a \f))))
+                     sut/eof])]
+      (is (= {:success ["TRue"  nil]} (test-parse p "TRue")))
+      (is (= {:success ["faLSe" nil]} (test-parse p "faLSe")))
+      (is (= {:success [""      nil]} (test-parse p "")))
+      (is (= {:success ["ABc"   nil]} (test-parse p "ABc")))
+      (is (= {:success ["FFe"   nil]} (test-parse p "FFe")))
+      (is (= {:error #:parka{:parse-error true
+                             :loc "<test> line 1 col 4"
+                             :message "failed expectation"
+                             :expectations #{\E \e}}}
+             (test-parse p "falS")))
+      #_(is (= {:success ["abC" "ABC" "abc" "Abc"]}
+               (test-parse (sut/* p) "abCABCabcAbc")))
+      #_(is (= {:success []} (test-parse (sut/* p) ""))))))
 
-#_(deftest test-many-till
-  (testing "basics"
-    (let [p (sut/pseq-at
-              1 (sut/lit "\"")
-              (sut/stringify (sut/many-till sut/any (sut/lit "\""))))]
-      (is (= "abc" (test-parse p "\"abc\"")))
-      (is (= ""    (test-parse p "\"\"")))
-      (testing "unterminated string"
-        (is (thrown-with-msg? Exception #"expected literal '\"'"
-                              (test-parse p "\"ab"))))))
-  (testing "bad inner"
-    (let [p (sut/between (sut/lit "a") (sut/lit "c")
-                         (sut/many (sut/lit "b")))]
-      (is (= ["b" "b" "b"] (test-parse p "abbbc")))
-      (is (thrown-with-msg? Exception #"expected literal 'c'"
-          (test-parse p "abbdc"))))))
-
-#_(deftest test-string-autoupgrade
-  (is (= "a" (test-parse "a" "a")))
-  (is (= ["a" "b" "c"] (test-parse (sut/pseq "a" (sut/lit "b") "c") "abc"))))
-
-#_(deftest test-symbol-autoupgrade
-  (let [g (sut/grammar {:start (sut/pseq "a" :b (sut/sym :c))
-                        :b     "b"
-                        :c     (sut/lit-ic "c")})]
-    (is (= ["a" "b" "c"] (sut/parse-str g "<test>" "abc")))))
-
+(comment
+  {:error :parka.machine.peg/expected-failure})
