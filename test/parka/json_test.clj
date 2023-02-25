@@ -11,16 +11,16 @@
                                        (prn "start" xs)
                                        xs)))
    :json-value (p/alt :array :object :null :bool :string :number)
-   :ws         (p/drop (p/* (p/one-of " \t\r\n")))
+   :ws         (p/drop (p/* (set " \t\r\n")))
    :null       (p/action "null" (constantly nil))
    :bool       (p/action
                 (p/alt "true" "false")
                 #(= % "true"))
-   :hex        (p/one-of "0123456789ABCDEFabcdef")
+   :hex        (p/ic (set "0123456789ABCDEFabcdef"))
    :unicode    (p/action ["\\u" :hex :hex :hex :hex]
                          (fn [[_ a b c d]]
                            (str (char (Long/parseLong (str a b c d) 16)))))
-   :escaped    (p/action ["\\" (p/one-of "\"\\/nrbft")]
+   :escaped    (p/action ["\\" (set "\"\\/nrbft")]
                          (fn [[_ v]]
                            (case v
                              "n" "\n"
@@ -32,8 +32,8 @@
    :strchar    (p/alt :unicode :escaped (p/pick [1] [(p/not \") p/any]))
    :string     (p/action [\" (p/* :strchar) \"]
                          (comp string/join second))
-   :pm         (p/one-of "+-")
-   :digits     (p/str (p/+ (p/one-of "0123456789")))
+   :pm         (set "+-")
+   :digits     (p/str (p/+ (p/span \0 \9)))
    :number     (p/action
                 [(p/? :pm)
                  :digits

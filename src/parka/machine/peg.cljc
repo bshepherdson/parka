@@ -135,25 +135,6 @@
     (pos+ m)
     (pc+ m)))
 
-(defmethod exec :test-char
-  [m [_ ch delta]]
-  (if (= ch (head m))
-    (-> m pc+ pos+)
-    (pc+ m delta)))
-
-(defmethod exec :test-any
-  [m [_ n delta]]
-  (let [pos' (+ (:pos m) n)]
-    (if (<= pos' (count (:input m)))
-      (-> m pc+ (pos+ n))
-      (pc+ m delta))))
-
-(defmethod exec :test-charset
-  [m [_ chs delta]]
-  (if (chs (head m))
-    (-> m pc+ pos+)
-    (pc+ m delta)))
-
 ;;; Capturing and stack management
 (defmethod exec :drop
   [m _]

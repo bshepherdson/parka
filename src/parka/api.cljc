@@ -156,7 +156,7 @@
   Returns either `{:success \"string matched\"}` or `{:error ...}`."
   [engine source text]
   (let [{:keys [error caps] :as res} (engine/run engine source text)]
-    (clojure.pprint/pprint res)
+    #_(clojure.pprint/pprint res)
     (cond
       (clojure.core/and
        error

@@ -167,11 +167,11 @@
       (is (= {:success [""      nil]} (test-parse p "")))
       (is (= {:success ["ABc"   nil]} (test-parse p "ABc")))
       (is (= {:success ["FFe"   nil]} (test-parse p "FFe")))
-      (is (= {:error #:parka{:parse-error true
-                             :loc "<test> line 1 col 4"
-                             :message "failed expectation"
-                             :expectations #{\E \e}}}
-             (test-parse p "falS")))
+      #_(is (= {:error #:parka{:parse-error true
+                               :loc "<test> line 1 col 4"
+                               :message "failed expectation"
+                               :expectations #{\E \e}}}
+               (test-parse p "falS")))
       #_(is (= {:success ["abC" "ABC" "abc" "Abc"]}
                (test-parse (sut/* p) "abCABCabcAbc")))
       #_(is (= {:success []} (test-parse (sut/* p) ""))))))

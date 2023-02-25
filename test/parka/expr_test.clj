@@ -1,32 +1,32 @@
 (ns parka.expr-test
   (:require
-    [clojure.string :as string]
-    [clojure.test :refer [deftest is testing]]
-    [parka.api :as p]))
+   [clojure.string :as string]
+   [clojure.test :refer [deftest is testing]]
+   [parka.api :as p]))
 
 (def math-rules
   {:start    (p/pick [0] [:expr p/eof])
    :expr     (p/alt (p/action
-                      [:mult    "+" :expr]
-                      (fn [[m _ e]]
-                        (+ m e)))
+                     [:mult    "+" :expr]
+                     (fn [[m _ e]]
+                       (+ m e)))
                     :mult)
    :mult     (p/alt (p/action
-                      [:primary "*" :mult]
-                      (fn [[p _ m]]
-                        (* p m)))
+                     [:primary "*" :mult]
+                     (fn [[p _ m]]
+                       (* p m)))
                     :primary)
    :primary  (p/alt (p/pick [1] [\( :expr \)])
                     :number)
    :number   (p/action
-               [(p/? \-) :decimal]
-               (fn [[minus decimal]]
-                 (if minus
-                   (- decimal)
-                   decimal)))
+              [(p/? \-) :decimal]
+              (fn [[minus decimal]]
+                (if minus
+                  (- decimal)
+                  decimal)))
    :decimal  (p/action (p/+ :digit)
                        #(Integer/parseInt (string/join %)))
-   :digit    (p/one-of "0123456789")})
+   :digit    (p/span \0 \9)})
 
 (defn test-parse [s]
   (p/parse (p/compile (p/grammar math-rules :start)) "<test>" s))
