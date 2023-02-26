@@ -78,14 +78,18 @@
            (test-parse p "abbb")))
     (is (= {:success ["a" nil ["b" "b" "b" "b" "b"]]}
            (test-parse p "abbbbb")))
-    (is (= {:error :parka.machine.peg/expected-failure}
+    (is (= {:error #:parka{:parse-error true
+                           :loc "<test> line 1 col 1"
+                           :message ""}}
            (test-parse p "abb")))))
 
 (deftest test-not
   (let [p ["a" (sut/not "b") sut/any]]
     (is (= {:success ["a" nil "c"]}
            (test-parse p "acd")))
-    (is (= {:error :parka.machine.peg/expected-failure}
+    (is (= {:error #:parka{:parse-error true
+                           :loc "<test> line 1 col 2"
+                           :message ""}}
            (test-parse p "abd")))))
 
 (deftest test-?
@@ -100,8 +104,13 @@
            (test-parse base "abbbc")))
     (is (= {:success ["a" ["b" "b" "b"] nil]}
            (test-parse eofd "abbb")))
-    (is (= {:error :parka.machine.peg/expected-failure}
+    (is (= {:error #:parka{:parse-error true, :loc "<test> line 1 col 5", :message ""}}
            (test-parse eofd "abbbc")))))
+
+(comment
+  (let [base ["a" (sut/* \b)]
+        eofd (conj base sut/eof)]
+    (sut/compile eofd)))
 
 (deftest test-span
   (let [p (sut/span \a \z)]

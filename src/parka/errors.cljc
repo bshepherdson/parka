@@ -35,4 +35,3 @@
    :parka/loc          (location loc)
    :parka/message      msg
    :parka/expectations expectations})
-

@@ -104,6 +104,13 @@
                second)
        (not expr)))
 
+(defn as
+  "Labels an inner parser with a user-friendly name, for use in errors."
+  [label inner]
+  {:parka/type  :parka/context
+   :parka/inner inner
+   :parka/label label})
+
 (defn span
   "Given two characters, returns a parser that will match any single character in
   the inclusive range from the first to the second."

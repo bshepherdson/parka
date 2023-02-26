@@ -18,7 +18,7 @@
 (defmulti compile (fn [p _] (parser-type p)))
 
 (defn compile-expr [p]
-  (into (compile p {:capture? true}) [[:end]]))
+  (into [] (concat (compile p {:capture? true}) [[:end]])))
 
 (defn- up-down [ch]
   [(first (str/upper-case ch))
@@ -46,7 +46,7 @@
   [target {:keys [capture?] :as s}]
   (let [core (mapv #(case-char % s) target)]
     (if capture?
-      (into [] (concat [[:mark]] core [[:capture]]))
+      (concat [[:mark]] core [[:capture]])
       core)))
 
 (defmethod compile :parka/any
@@ -60,10 +60,10 @@
   (let [pre (when capture?
               [[:push []]])
         compiled (mapcat (if capture?
-                           #(into (compile % s) [[:apply-capture-2 conj]])
+                           #(concat (compile % s) [[:apply-capture-2 conj]])
                            #(compile % s))
                          ps)]
-    (into [] (concat pre compiled))))
+    (concat pre compiled)))
 
 (defn- compile-alt [alts s]
   (condp = (count alts)
@@ -71,34 +71,40 @@
     1 (compile (first alts) s)
     (let [rhs (compile-alt (rest  alts) s)
           lhs (compile     (first alts) s)]
-      (into [] (concat [[:choice (+ 2 (count lhs))]]
-                       lhs
-                       [[:commit (inc (count rhs))]]
-                       rhs)))))
+      (concat [[:choice (+ 2 (count lhs))]]
+              lhs
+              [[:commit (inc (count rhs))]]
+              rhs))))
 
 (defmethod compile :parka/alt
   [{:parka/keys [alts]} s]
   (compile-alt alts s))
 
+(defn- labeled? [p]
+  (when (= (:parka/type p) :parka/context)
+    (:parka/label p)))
+
 (defmethod compile :parka/not
   [{:parka/keys [inner]} {:keys [capture?] :as s}]
   ; No need to capture lookahead.
-  (let [p (compile inner (assoc s :capture? false))]
-    (into []
-          (concat [[:choice (+ 2 (count p))]]
-                  p
-                  [[:fail-twice]]
-                  (when capture? [[:push nil]])))))
+  (let [p      (compile inner (assoc s :capture? false))
+        ?label (labeled? p)]
+    (concat [[:choice (+ 3 (count p))]
+             (if ?label
+               [:context]
+               [:context-mark])]
+            p
+            [[:not-succeeded ?label]]
+            (when capture? [[:push nil]]))))
 
 (defmethod compile :parka/and
   [{:parka/keys [inner]} s]
   ; No need to capture lookahead.
   (let [p (compile inner (assoc s :capture? false))]
-    (into []
-          (concat [[:choice (+ 2 (count p))]]
-                  p
-                  [[:back-commit 2]
-                   [:fail]]))))
+    (concat [[:choice (+ 2 (count p))]]
+            p
+            [[:back-commit 2]
+             [:fail]])))
 
 (defmethod compile :parka/set
   [chs {:keys [capture? decase?]}]
@@ -106,9 +112,9 @@
               (set (concat (map (comp first str/upper-case) chs)
                            (map (comp first str/lower-case) chs)))
               chs)]
-    (into [] (concat (when capture? [[:mark]])
-                     [[:charset chs]]
-                     (when capture? [[:capture]])))))
+    (concat (when capture? [[:mark]])
+            [[:charset chs]]
+            (when capture? [[:capture]]))))
 
 (defmethod compile :parka/nonterminal
   [nonterminal {:keys [decase?]}]
@@ -118,9 +124,12 @@
   [[:open-call nonterminal]])
 
 (defn compile-grammar [[[sym pat] & rs] labels code s]
-  (let [compiled (compile pat s)
+  (let [ctxd     {:parka/type :parka/context
+                  :parka/inner pat
+                  :parka/label {:parka/soft (name sym)}}
+        compiled (compile ctxd s)
         labels'  (assoc labels sym (count code))
-        code'    (into code (concat compiled [[:return]]))]
+        code'    (concat code compiled [[:return]])]
     (if (empty? rs)
       [labels' code']
       (recur rs labels' code' s))))
@@ -134,7 +143,7 @@
     code))
 
 (defn resolve-calls [code labels]
-  (into [] (map-indexed #(resolve-call %2 %1 labels) code)))
+  (map-indexed #(resolve-call %2 %1 labels) code))
 
 (defmethod compile :parka/grammar
   [{:parka/keys [rules start]} s]
@@ -150,22 +159,28 @@
   [{:parka/keys [inner]} {:keys [capture?] :as s}]
   (let [p (compile inner s)
         cap-width (if capture? 1 0)]
-    (into []
-          (concat (when capture? [[:push []]])
-                  [[:choice (+ 2 cap-width (count p))]]
-                  p
-                  (when capture? [[:apply-capture-2 conj]])
-                  [[:partial-commit (- (+ cap-width (count p)))]]))))
+    (concat (when capture? [[:push []]])
+
+            [[:choice (+ 2 cap-width (count p))]]
+            p
+            (when capture? [[:apply-capture-2 conj]])
+            [[:partial-commit (- (+ cap-width (count p)))]])))
 
 (defmethod compile :parka/drop
   [{:parka/keys [inner]} {:keys [capture?] :as s}]
-  (into [] (concat (compile inner (assoc s :capture? false))
-                   (when capture? [[:push nil]]))))
+  (concat (compile inner (assoc s :capture? false))
+          (when capture? [[:push nil]])))
+
+(defmethod compile :parka/context
+  [{:parka/keys [inner label]} {:keys [alt?]}]
+  (concat [[:context label]]
+          inner
+          [[:pop-context]]))
 
 (defmethod compile :parka/action
   [{:parka/keys [inner action]} {:keys [capture?] :as s}]
-  (into [] (concat (compile inner s)
-                   (when capture? [[:apply-capture-1 action]]))))
+  (concat (compile inner s)
+          (when capture? [[:apply-capture-1 action]])))
 
 (defmethod compile :parka/ic
   [{:parka/keys [inner]} s]

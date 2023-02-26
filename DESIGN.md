@@ -54,3 +54,22 @@ The stack machine is powered by the following instructions:
 Note that the capture stack is part of the `:choice` stack, so backtracking
 already reverts the capture stack properly.
 
+### Error Handling
+
+The most meaningful error message is the innermost rule that went wrong, with
+some context around it. "Error parsing if statement: expected expression".
+
+Therefore it's important that the input parser can give names to different parts,
+and that `alt` and `[]` give context.
+
+Parka can label any parser with `(p/as "human label" parser)`.
+
+Generating parse errors all the time is a huge waste of time, since they are
+nearly always thrown away as a different `:choice` is taken.
+
+But it's inexpensive to keep track of the nesting and return that stack whole
+with each error. It will only get resolved into an error report if it reaches
+the top level.
+
+- `[:context]`
+- `[:pop-context]`

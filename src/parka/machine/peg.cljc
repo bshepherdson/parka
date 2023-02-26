@@ -1,14 +1,22 @@
 (ns parka.machine.peg
   (:require
+   [clojure.string :as str]
    [parka.errors :as errs]))
 
 ;;; The state is
-;;; {:pc   n
-;;; :code  [...]
-;;; :stack [...]
-;;; :input "str"
-;;; :pos   i
-;;; :caps  []}
+;;; {:pc     n
+;;; :code    [...]
+;;; :stack   [...]
+;;; :context {}
+;;; :input   "str"
+;;; :pos     i
+;;; :caps    []}
+
+;; An ideal error message should explain what it was expecting to find (possibly
+;; several things), and what it found instead, with a pointer to the location.
+;; That's easy enough for a literal character, set or string.
+;; For a sequence, just whatever it was trying to find next?
+;; For an alt, we want to collect a list of all the paths, 
 
 (defn- head [^clojure.lang.IPersistentMap m]
   (let [input ^String (.valAt m :input)
@@ -28,8 +36,32 @@
 (defn- end [m]
   (assoc m :done? true))
 
+(defn- error-context
+  ([ctx]
+   (if (empty? ctx)
+     ""
+     (error-context (peek ctx) (pop ctx))))
+
+  ([base ctx]
+   ;; If there are real human labels, use only those.
+   ;; If there are no human labels, use up to the last 3 "soft", automatic labels.
+   (let [labels (remove :parka/soft ctx)
+         src    (if (empty? labels)
+                  (take-last 3 (keep :parka/soft ctx))
+                  labels)
+         msg    (or (:parka/message base) base)]
+     (str (str/join (for [label src]
+                      (str "Error parsing " label ": ")))
+          base))))
+
 (defn- abort [m err]
-  (assoc m :done? true :error err))
+  (assoc m
+         :done? true
+         :error (do
+                  (prn "abort error" err)
+                  (if (= err ::expected-failure)
+                    (errs/parse-error m (error-context (:context m)))
+                    (update err :parka/message error-context (:context m))))))
 
 (defn- fail
   "Drain the stack until we find a `[pc' pos' caps']` pair; set these values."
@@ -109,13 +141,38 @@
         (assoc :pos  (:pos tos)
                :caps (conj (:caps tos) nil)))))
 
+(defmethod exec :context
+  [m [_ label]]
+  (-> m
+      pc+
+      (update :context conj label)))
+
+(defmethod exec :context-mark
+  [m _]
+  (-> m
+      pc+
+      (update :context conj {:parka/lookahead (:pos m)})))
+
+(defmethod exec :pop-context
+  [m _]
+  (-> m
+      pc+
+      (update :context pop)))
+
 (defmethod exec :fail
   [m [_ err]]
   (fail m (or err ::expected-failure)))
 
-(defmethod exec :fail-twice
-  [m [_ err]]
-  (fail (update m :stack pop) (or err ::expected-failure)))
+(defmethod exec :not-succeeded
+  ;; At the start of the not clause, the start of the lookahead was [:context-mark]ed.
+  ;; If the lookahead fails as expected, it'll revert to the earlier [:choice], which
+  ;; rests the context.
+  ;; However if we make it here, then the character at the marked position was the
+  ;; first one that was unexpected.
+  [{:keys [caps input] :as m} [_ err]]
+  (let [mark  (peek caps)
+        found (str "found unexpected " (or err (nth input mark)))]
+    (fail (update m :stack pop) found)))
 
 (defmethod exec :end
   [m _]
@@ -183,6 +240,7 @@
   (loop [m {:pc       0
             :code     code
             :stack    []
+            :context  []
             :input    text
             :filename label
             :pos      0
