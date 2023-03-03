@@ -21,9 +21,11 @@
   (:refer-clojure :exclude [+ * and compile drop not str])
   (:require
    [clojure.string :as string]
+   [parka.dynamic :as dynamic]
    [parka.errors :as errors]
-   [parka.machine.compiler :as compiler]
-   [parka.machine.peg :as engine]))
+   [parka.tokenizer :as tokens]
+   #_[parka.machine.compiler :as compiler]
+   #_[parka.machine.peg :as engine]))
 
 ;;;; Parsing expression builders
 (defn alt
@@ -107,7 +109,7 @@
 (defn as
   "Labels an inner parser with a user-friendly name, for use in errors."
   [label inner]
-  {:parka/type  :parka/context
+  {:parka/type  :parka/label
    :parka/inner inner
    :parka/label label})
 
@@ -119,12 +121,12 @@
        (map char)
        set))
 
-(defn ic
-  "Wraps an inner parser, and converts it (recursively) to make all character matches
+#_(defn ic
+    "Wraps an inner parser, and converts it (recursively) to make all character matches
   case-insensitive."
-  [inner]
-  {:parka/type  :parka/ic
-   :parka/inner inner})
+    [inner]
+    {:parka/type  :parka/ic
+     :parka/inner inner})
 
 (defn grammar
   "Given a map `rules` of `:label` to expression, and the `start` label, builds
@@ -151,23 +153,37 @@
   (not any))
 
 ;;;; Top-level functions
-(defn compile [expr]
-  (compiler/compile-expr expr))
+;; This is the original PEG compiler and evaluator.
+#_(defn compile [expr tokenizer]
+    {:tokens (-> tokenizer meta :token-map)
+     :code   (compiler/compile-expr expr)})
 
-(defn parse
-  "Given a parsing `engine`, `source` label (eg. the file name), and input
+#_(defn parse
+    "Given a parsing `engine`, `source` label (eg. the file name), and input
   `text`, attempts to parse the input.
 
   The `engine` must be one compiled by `compile`.
 
   Returns either `{:success \"string matched\"}` or `{:error ...}`."
-  [engine source text]
-  (let [{:keys [error caps] :as res} (engine/run engine source text)]
-    #_(clojure.pprint/pprint res)
-    (cond
-      (clojure.core/and
-       error
-       (keyword? error))    {:error error}
-      error                 {:error (update error :parka/loc errors/pretty-location)}
-      (not= 1 (count caps)) (throw (ex-info "bad capture!" res))
-      :else                 {:success (peek caps)})))
+    [engine source text]
+    (let [{:keys [caps error pos] :as res} (engine/run engine source text)]
+      #_(clojure.pprint/pprint res)
+      (cond
+        (clojure.core/and
+         error
+         (keyword? error))    {:error error}
+        error                 {:error (update error :parka/loc errors/pretty-location)}
+        (not= 1 (count caps)) (throw (ex-info "bad capture!" res))
+        :else                 {:success  (peek caps)
+                               :consumed pos})))
+
+;; This is the dynamic, recursive descent parser.
+(def compile dynamic/compile)
+
+(def tokenizer tokens/tokenizer)
+
+(defn parse [{:keys [tokenizer] :as engine} filename text]
+  (if tokenizer
+    (let [tokens (tokenizer filename text)]
+      (dynamic/evaluate engine filename tokens))
+    (dynamic/evaluate engine filename text)))

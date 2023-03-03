@@ -236,11 +236,12 @@
         pc+
         (assoc :caps (conj caps2 tos')))))
 
-(defn run [code label text]
+(defn run [{code :parser tokens :tokens} label text]
   (loop [m {:pc       0
             :code     code
             :stack    []
             :context  []
+            :tokens   tokens
             :input    text
             :filename label
             :pos      0

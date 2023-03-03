@@ -2,7 +2,8 @@
   (:require
    [clojure.string :as string]
    [clojure.test :refer [deftest is testing]]
-   [parka.api :as p]))
+   [parka.api :as p]
+   [parka.test-util]))
 
 (def math-rules
   {:start    (p/pick [0] [:expr p/eof])
@@ -33,21 +34,24 @@
 
 (deftest math-test
   (testing "just numbers"
-    (is (= {:success 1}   (test-parse "1")))
-    (is (= {:success 141} (test-parse "141")))
-    (is (= {:success 0}   (test-parse "000")))
-    (is (= {:success -17} (test-parse "-17")))
-    (is (= {:error :parka.machine.peg/expected-failure}
-           (test-parse "0d"))))
-  (testing "factors"
-    (is (= {:success 36}   (test-parse "4*9")))
-    (is (= {:success 396}  (test-parse "4*99")))
-    (is (= {:success 252}  (test-parse "4*9*7"))))
-  (testing "adding"
-    (is (= {:success 13} (test-parse "4+9")))
-    (is (= {:success 40} (test-parse "4*9+4")))
-    (is (= {:success 67} (test-parse "4+9*7"))))
-  (testing "parens"
-    (is (= {:success 52} (test-parse "4*(9+4)")))
-    (is (= {:success 91} (test-parse "(4+9)*7")))))
+    (is (= 1   (test-parse "1")))
+    (is (= 141 (test-parse "141")))
+    (is (= 0   (test-parse "000")))
+    (is (= -17 (test-parse "-17")))
+    (is (ex-info? "Expected EOF, but got d"
+                  {:expected {:not "anything"}}
+                  (test-parse "0d"))))
 
+  (testing "factors"
+    (is (= 36   (test-parse "4*9")))
+    (is (= 396  (test-parse "4*99")))
+    (is (= 252  (test-parse "4*9*7"))))
+
+  (testing "adding"
+    (is (= 13 (test-parse "4+9")))
+    (is (= 40 (test-parse "4*9+4")))
+    (is (= 67 (test-parse "4+9*7"))))
+
+  (testing "parens"
+    (is (= 52 (test-parse "4*(9+4)")))
+    (is (= 91 (test-parse "(4+9)*7")))))
