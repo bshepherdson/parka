@@ -29,7 +29,8 @@
   Options:
   - `:blank true` Drops the input value, for tokens like punctuation with no value.
   - `:post fn` Tokenizer will run `(update t :value fn)` to post-process the value.
-  "
+  - `:pre fn` Runs this function on the input string/char before processing it.
+      - Doesn't apply to regular expressions or Parka parsers."
   (:require
    [clojure.string :as str]
    [parka.dynamic :as dynamic]
@@ -71,10 +72,11 @@
   (if-let [token (tag td)]
     (let [base #:parka{:token token
                        :label (label td)}
-          post (some-> td options :post)]
-      (if post
-        #(assoc base :parka/value (post %))
-        #(assoc base :parka/value %)))
+          {:keys [blank post]} (some-> td options)]
+      (cond
+        blank (constantly base)
+        post  #(assoc base :parka/value (post %))
+        :else #(assoc base :parka/value %)))
     (constantly nil)))
 
 (defmulti ^:private compile-token
@@ -83,18 +85,33 @@
   `[length-consumed token-map]`."
   token-flavour)
 
-;; TODO: Case-insensitive mode for :string and :strings.
+(defn- cmplen [f expected]
+  (let [len (count expected)]
+    (fn [input]
+      (and (< (count input) len)
+           (= expected (f (subs input 0 len)))))))
+
 (defmethod compile-token :string [td]
-  (let [s   (desc td)
-        out (outputter td)]
-    #(when (str/starts-with? % s)
-       [(count s) (out s)])))
+  (let [s    (desc td)
+        pre  (some-> td options :pre)
+        out  (outputter td)
+        len  (count s)
+        pred (if pre
+               (cmplen pre s)
+               #(str/starts-with? % s))]
+    #(when (pred %)
+       [len (out s)])))
 
 (defmethod compile-token :strings [td]
-  (let [strs (desc td)
-        out  (outputter td)]
+  (let [strs  (desc td)
+        out   (outputter td)
+        pre   (some-> td options :pre)
+        preds (for [s strs]
+                (if pre
+                  (cmplen pre s)
+                  #(str/starts-with? % s)))]
     (fn [input]
-      (when-let [s (first (filter #(str/starts-with? input %) strs))]
+      (when-let [[_ s] (first (filter #((first %) input) preds))]
         [(count s) (out s)]))))
 
 (defn- tweak-regex [re]
@@ -106,6 +123,8 @@
 (defmethod compile-token :regex [td]
   (let [re  (tweak-regex (desc td))
         out (outputter td)]
+    (when (some-> td options :pre)
+      (throw (ex-info ":pre is not supported on regex tokens" {:token (tag td)})))
     #(when-let [match (re-find re %)]
        (let [[match value] (if (string? match)
                              [match match]
@@ -114,19 +133,33 @@
 
 (defmethod compile-token :predicate [td]
   (let [pred (desc td)
+        pre  (some-> td options :pre)
         out  (outputter td)]
-    #(let [match (take-while pred %)]
+    #(let [match (take-while pred (if pre
+                                    (map pre %)
+                                    %))]
        (if (empty? match)
          nil
          (let [s (str/join match)]
            [(count s) (out s)])))))
 
 (defmethod compile-token :parka [td]
-  (let [parser (dynamic/compile (desc td))
+  (let [parser (desc td)
+        _ (prn ":parka" parser)
+        parser (if (:code parser)
+                 parser
+                 (dynamic/compile parser))
         out    (outputter td)]
-    #(let [res (dynamic/evaluate parser "<token>" %)]
-       (when-not (:error res)
-         [(:pos res) (out (peek (:caps res)))]))))
+    (when (some-> td options :pre)
+      (throw (ex-info ":pre is not supported on inner parser tokens" {:token (tag td)})))
+    #(try
+       (let [{:keys [consumed result]} (dynamic/execute parser "<token>" %)]
+         (prn "inner parse" consumed result)
+         (throw (ex-info "hurk" {}))
+         [100000 #_consumed (out result)])
+       (catch #?(:clj Exception :cljs js/Error) _
+         (prn "inner parse failed")
+         nil))))
 
 (defn- input-slice [input pos]
   ;; In CLJS, substrings are constant-time so we can just use that.
@@ -146,27 +179,30 @@
   "Given a sequence of tokenizers, compiles them and returns a function from an input
   string to a sequence of tokens."
   [token-specs]
-  (let [compiled (map compile-token token-specs)]
-    (let [tokenizer-fn
-          (fn [filename input]
-            (let [len (count input)]
-              (loop [pos   0
-                     ts    (transient [])]
-                (let [txt (input-slice input pos)]
-                  (if-let [[delta token] (some #(% txt) compiled)]
-                    (let [pos   (+ pos delta)
-                          ts    (if token
-                                  (conj! ts token)
-                                  ts)]
-                      (if (>= pos len)
-                        (persistent! ts)
-                        (recur pos ts)))
+  (let [compiled (map compile-token token-specs)
+        tokenizer-fn
+        (fn [filename input]
+          (let [len (count input)]
+            (loop [pos   0
+                   ts    (transient [])]
+              (let [txt (input-slice input pos)]
+                (if-let [[delta token] (some #(% txt) compiled)]
+                  (let [_     (prn "delta" delta "token" token)
+                        pos   (+ pos delta)
+                        ts    (if token
+                                (conj! ts token)
+                                ts)]
+                    (if (>= pos len)
+                      (persistent! ts)
+                      (recur pos ts)))
+                  (do
+                    (prn "errors")
                     (errs/parse-error {:filename filename
                                        :pos      pos
                                        :input    input}
-                                      (error-msg (persistent! ts) txt)))))))]
-      (vary-meta tokenizer-fn
-                 assoc :token-map
-                 (into {} (for [[tag label] token-specs
-                                :when tag]
-                            [tag label]))))))
+                                      (error-msg (persistent! ts) txt))))))))]
+    (vary-meta tokenizer-fn
+               assoc :token-map
+               (into {} (for [[tag label] token-specs
+                              :when tag]
+                          [tag label])))))

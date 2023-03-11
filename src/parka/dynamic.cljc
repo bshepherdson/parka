@@ -39,20 +39,34 @@
       (throw (ex-info (str "Expected " (pr-str p) ", got " (pr-str ch))
                       {:expected p :got ch})))))
 
+(defn- substring [s pos end]
+  #?(:cljs (subs s pos end)
+     :clj  (.subSequence s pos end)))
+
+(defn- compare-prefix [target input start]
+  (if (<= (+ start (count target))
+          (count input))
+    ;; Enough room, so check the prefix.
+    (let [prefix (substring input start (+ start (count target)))]
+      (if (= target prefix)
+        :match
+        prefix))
+    ;; Not enough length - found EOF.
+    :eof))
+
 (defmethod -evaluate :parka/string
   [target {:keys [capture? input pos] :as s}]
-  (let [end  (+ pos (count target))
-        mate (when (<= end (count input))
-               (str/join (subs input pos end)))]
-    (cond
-      (nil? mate)     (throw (ex-info
-                              (str "Unexpected EOF! Expected " (pr-str target))
-                              {:expected target}))
-      (= target mate) [(pos+ s (count target))
-                       (when capture? target)]
-      :else           (throw (ex-info
-                              (str "Expected " (pr-str target) ", got " (pr-str mate))
-                              {:expected target :got mate})))))
+  (let [prefix (compare-prefix target input pos)]
+    (case prefix
+      :eof   (throw (ex-info
+                     (str "Unexpected EOF! Expected " (pr-str target))
+                     {:expected target}))
+      :match [(pos+ s (count target))
+              (when capture? target)]
+      ;; The default is the string we found instead.
+      (throw (ex-info
+              (str "Expected " (pr-str target) ", got " (pr-str prefix))
+              {:expected target :got prefix})))))
 
 (defmethod -evaluate :parka/set
   [chs {:keys [capture?] :as s}]
@@ -152,9 +166,11 @@
   [{:parka/keys [inner]} {:keys [capture?] :as s}]
   (loop [res (when capture? (transient []))
          s   s]
+    (prn "star loop" s inner)
     (if-let [[s' res-el] (try
                            (-evaluate inner s)
-                           (catch #?(:clj Exception :cljs js/Error) _
+                           (catch #?(:clj Exception :cljs js/Error) e
+                             (prn "star inner failed" e)
                              nil))]
       ;; If it successfully matched, keep going.
       (recur (when capture? (conj! res res-el)) s')
@@ -185,12 +201,22 @@
     :tokenizer tokenizer
     :code      expr}))
 
-(defn evaluate
-  "Runs the parser over the input, which might be tokens or might be characters."
+(defn execute
+  "Runs the parser over the input, which might be tokens or might be characters.
+  Returns a map `{:result ... :consumed n :remaining m}`."
   [{:keys [code tokens]} filename input]
-  (let [[_ result] (-evaluate code {:tokens   tokens
+  (let [[s result] (-evaluate code {:tokens   tokens
                                     :capture? true
                                     :filename filename
                                     :input    input
                                     :pos      0})]
-    result))
+    (prn "execute" s result)
+    {:result    result
+     :consumed  (:pos s)
+     :remaining (- (count input) (:pos s))}))
+
+(defn evaluate
+  "Runs the parser over the input, which might be tokens or might be characters.
+  Returns the result only."
+  [parser filename input]
+  (:result (execute parser filename input)))

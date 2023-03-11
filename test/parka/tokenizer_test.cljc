@@ -2,25 +2,28 @@
   (:require
    [clojure.string :as str]
    [clojure.test :refer [are deftest is testing]]
+   [parka.api :as p]
    [parka.tokenizer :as pt]))
 
-(comment
-  (json-tokenizer "<test>" "\"new\\nlines\""))
+(defn- parse-int [text base]
+  (#?(:clj Long/parseLong :cljs js/parseInt) text base))
+
+(def ^:private escapes
+  {"\\\"" "\""
+   "\\\\" "\\"
+   "\\n"  "\n"
+   "\\r"  "\r"
+   "\\b"  "\b"
+   "\\f"  "\f"
+   "\\t"  "\t"})
 
 (defn- string-escapes [s]
   (-> s
       ;; Unicode \u1234 escapes
-      (str/replace #"\\u([0-9a-fA-F]{4})" #(char (Long/parseLong % 16)))
+      (str/replace #"\\u([0-9a-fA-F]{4})" #(char (parse-int % 16)))
       ;; ASCII \_ escapes
       (str/replace #"\\[\"\\/bfnrt]"
-                   #(get {"\\\"" "\""
-                          "\\\\" "\\"
-                          "\\n"  "\n"
-                          "\\r"  "\r"
-                          "\\b"  "\b"
-                          "\\f"  "\f"
-                          "\\t"  "\t"}
-                         %))))
+                   #(get escapes %))))
 
 (def json-tokens
   [[nil      "whitespace" (set " \t\r\n")]
@@ -114,4 +117,33 @@
                                "\tLast few tokens: { (\"{\" \")\", } (\"}\" \")\", string (\"abc\" \")\"")}
          (json-tokenizer "<file>" "{}\"abc\"   !"))))
 
+(comment
+  (parka.dynamic/execute (p/compile (p/* "ab")) "<test>" "abababab"))
+
+(deftest inner-parser-tokenizing-test
+  (let [tokens    [[:abs "AB pairs" (p/* "ab")]]
+        tokenizer (pt/tokenizer tokens)]
+    (tokenizer "<text>" "abababab")
+    #_(is (= [#:parka{:token :abs :label "AB pairs" :value ["ab" "ab" "ab" "ab"]}]
+             (tokenizer "<text>" "abababab"))))
+
+  #_(let [inner-grammar {:string      (p/action (p/pick [1] [\" (p/* :string-char) \"])
+                                                str/join)
+                         :string-char (p/alt :unicode :escape (p/any-but \"))
+                         :unicode     (p/action ["\\u" :hex :hex :hex :hex]
+                                                (fn [[_ & hex]]
+                                                  (char (parse-int (str/join hex) 16))))
+                         :hex         (set "0123456789ABCDEFabcdef")
+                         :escape      (p/action ["\\" p/any]
+                                                #(get escapes (apply str %)))}
+          inner-parser  (p/compile (p/grammar inner-grammar :string))
+          tokens        [[:string "string" inner-parser]]
+          tokenizer     (pt/tokenizer tokens)
+          tt            (fn [value]
+                          #:parka{:token :string
+                                  :label "string"
+                                  :value value})]
+      (is (= [(tt "foo")] (tokenizer "<test>" "\"foo\"")))))
+
 ;; TODO: Test parser-based tokenization
+;; TODO: Test :pre for doing things like case-insensitive tokens.
