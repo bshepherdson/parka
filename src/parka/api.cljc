@@ -18,12 +18,14 @@
 
   Once you have constructured your complete expression, call `compile` with it.
   The returned engine can be run by calling `parse`."
-  (:refer-clojure :exclude [+ * and compile drop not str])
+  (:refer-clojure :exclude [+ * and compile do drop let not str])
   (:require
+    [clojure.core :as core]
     [clojure.string :as string]
     [parka.errors :as errors]
     [parka.machine.compiler :as compiler]
-    [parka.machine.peg :as engine]))
+    [parka.machine.peg :as engine])
+  #?(:cljs (:require-macros [parka.api])))
 
 ;;;; Parsing expression builders
 (defn alt
@@ -41,13 +43,37 @@
    :parka/action f
    :parka/inner  expr})
 
-(defn pick
-  "Given a `path` like `get-in` and a parsing `expr`, does
-  `(get-in result path)` on the result of the expression.
-  This is useful for extracting a useful part of a noisy expression, such as
-  ignoring white space and brackets."
-  [path expr]
-  (action expr #(get-in % path)))
+(defn value
+  "Pipelined version of [[action]], resembles [[->]].
+
+  Given an expression and 0 or more unary functions, runs the functions left to
+  right over the parse result returned by the inner expression."
+  [expr & fs]
+  (action expr (apply comp (reverse fs))))
+
+(defn group
+  "Given 1 or more expressions, parses them all and returns a vector of their
+  results. This is the proper name of the `[...]` shorthand."
+  [& exprs]
+  {:parka/type :parka/seq
+   :parka/seq  exprs})
+
+(defn between
+  "Parses `expr` between `lhs` and `rhs` (3-arity) or with `around` on each
+  side (2-arity).
+
+  Note that the inner `expr` comes first, which is intended to allow
+  `(-> :expr (p/between :whitespace) (p/between \\( \\)))`"
+  ([expr around]
+   (between expr around around))
+  ([expr lhs rhs]
+   (value (group lhs expr rhs) second)))
+
+(defn do
+  "Given 1 or more expressions, parses them all in order and returns the value
+  of the last one, like [[core/do]]."
+  [& exprs]
+  (value (apply group exprs) last))
 
 (defn drop
   "Parses an expr but drops its result, returning nil instead."
@@ -107,6 +133,46 @@
                second)
        (not expr)))
 
+;; TODO Add range, eg. (range \0 \9), (range \a \z)
+
+(defn expecting
+  "Parses like `expr` but in case of failure, overrides the default description
+  of what was expected with the `msg`."
+  [expr msg]
+  {:parka/type  :parka/label
+   :parka/inner expr
+   :parka/label msg})
+
+#?(:clj
+   (defmacro let
+     "This works like [[core/let]], but right-hand sides of the bindings
+     are parsing expressions, rather than Clojure values.
+
+     The body is regular Clojure code return a **plain value** - this becomes
+     the value of the parser.
+
+     For example:
+     ```
+     (p/let [x p
+     y q]
+     (fancy-fn x y 2))
+     ;; is equivalent to
+     (p/action [p q]
+     (fn [[x y]]
+     (fancy-fn x y 2)))
+     ```"
+     [bindings & body]
+     (when-not (vector? bindings)
+       (throw (ex-info "Bindings to parka.api/let must be in a vector." {})))
+     (when-not (even? (count bindings))
+       (throw (ex-info "parka.api/let must have an even number of bindings." {})))
+     (core/let [pairs (partition 2 bindings)
+                syms  (map first pairs)
+                exprs (map second pairs)]
+       `(action ~(vec exprs)
+                (fn [[~@syms]]
+                  ~@body)))))
+
 (defn grammar
   "Given a map `rules` of `:label` to expression, and the `start` label, builds
   a grammar composed of many named expressions.
@@ -137,21 +203,23 @@
 
   Returns either `{:success \"string matched\"}` or `{:error ...}`."
   [engine source text]
-  (let [{:keys [error caps] :as res} (engine/run engine source text)]
+  (core/let [{:keys [error caps] :as res} (engine/run engine source text)]
     (when (not= 1 (count caps))
       (throw (ex-info "bad capture!" res)))
     (cond
-      (clojure.core/and
+      (core/and
         error (keyword? error)) {:error error}
       error        {:error (update error :parka/loc errors/pretty-location)}
       :else        {:success (peek caps)})))
 
 
 (comment
-  (parse (compile [\a \b \c
-                   {:parka/type :parka/not
-                    :parka/inner {:parka/type :parka/any}}])
+  (parse (compile (let [_     \(
+                        inner any
+                        _     \)]
+                    (str inner)))
          "<test>"
-         "abc")
+         "(x)")
+  *e
   )
 

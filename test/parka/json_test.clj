@@ -6,7 +6,7 @@
     [parka.api :as p]))
 
 (def json-rules
-  {:start      (p/pick [1] [:ws :json-value :ws p/eof])
+  {:start      (p/value [:ws :json-value :ws p/eof] second)
    :json-value (p/alt :array :object :null :bool :string :number)
    :ws         (p/drop (p/* (p/one-of " \t\r\n")))
    :null       (p/action "null" (constantly nil))
@@ -26,7 +26,7 @@
                      "f" "\f"
                      "t" "\t"
                      v)))
-   :strchar    (p/alt :unicode :escaped (p/pick [1] [(p/not \") p/any]))
+   :strchar    (p/alt :unicode :escaped (p/do (p/not \") p/any))
    :string     (p/action [\" (p/* :strchar) \"]
                          (comp string/join second))
    :pm         (p/one-of "+-")
@@ -34,7 +34,7 @@
    :number     (p/action
                  [(p/? :pm)
                   :digits
-                  (p/? (p/pick [1] ["." :digits]))
+                  (p/? (p/do "." :digits))
                   (p/? [#{\e \E}
                         (p/? :pm)
                         :digits])]
@@ -57,18 +57,21 @@
    :comma       [:ws "," :ws]
    :object      (p/alt :empty-obj :full-obj)
    :empty-obj   (p/action [\{ :ws \}] (constantly {}))
-   :full-obj    (p/pick [2] [\{ :ws :obj-guts :ws \}])
-   :obj-guts    (p/action [:key-value (p/* (p/pick [1] [:comma :key-value]))]
+   :full-obj    (-> :obj-guts
+                    (p/between :ws)
+                    (p/between \{ \}))
+   :obj-guts    (p/action [:key-value (p/* (p/do :comma :key-value))]
                           (fn [[x xs]]
                             (into {} (concat [x] xs))))
    :key-value   (p/action
                   [:string :ws ":" :ws :json-value]
                   (fn [[k _ _ _ v]]
                     [k v]))
-   :array       (p/pick [2] [\[ :ws :array-guts :ws \]])
-   :array-guts  (p/alt :full-array :empty-array)
+   :array       (-> (p/alt :full-array :empty-array)
+                    (p/between :ws)
+                    (p/between \[ \]))
    :full-array  (p/action
-                 [:json-value (p/* (p/pick [1] [:comma :json-value]))]
+                 [:json-value (p/* (p/do :comma :json-value))]
                  (fn [[x xs]]
                    (into [x] xs)))
    :empty-array (p/action

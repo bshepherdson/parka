@@ -5,7 +5,7 @@
     [parka.api :as p]))
 
 (def math-rules
-  {:start    (p/pick [0] [:expr p/eof])
+  {:start    (p/value [:expr p/eof] first)
    :expr     (p/alt (p/action
                       [:mult    "+" :expr]
                       (fn [[m _ e]]
@@ -16,7 +16,7 @@
                       (fn [[p _ m]]
                         (* p m)))
                     :primary)
-   :primary  (p/alt (p/pick [1] [\( :expr \)])
+   :primary  (p/alt (p/value [\( :expr \)] second)
                     :number)
    :number   (p/action
                [(p/? \-) :decimal]

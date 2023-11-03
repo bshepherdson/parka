@@ -5,79 +5,48 @@
   (:require
     [parka.errors :as errs]))
 
-(defmulti compile
+(defmulti compile*
   (fn [pat _]
-    (cond
-      (map?     pat) (:parka/type pat)
-      (keyword? pat) :parka/nonterminal
-      (char?    pat) :parka/char
-      (string?  pat) :parka/string
-      (vector?  pat) :parka/seq
-      (set?     pat) :parka/set
-      :else (throw (ex-info "bad compile pattern" {:value pat})))))
+    (:parka/type pat)))
+
+(defn- ->parser [pat]
+  (cond
+    (map?     pat) pat
+    (keyword? pat) {:parka/type        :parka/nonterminal
+                    :parka/nonterminal pat}
+    (char?    pat) {:parka/type :parka/char   :parka/char   pat}
+    (string?  pat) {:parka/type :parka/string :parka/string pat}
+    (vector?  pat) {:parka/type :parka/seq    :parka/seq    pat}
+    (set?     pat) {:parka/type :parka/set    :parka/set    pat}
+    :else (throw (ex-info "bad compile pattern" {:value pat}))))
+
+(defn compile [p s]
+  (compile* (->parser p) s))
 
 (defn compile-expr [p]
   (into (compile p {:capture? true}) [[:end]]))
 
-(defmethod compile :parka/char
-  [p {:keys [capture?]}]
+(defmethod compile* :parka/char
+  [{ch :parka/char} {:keys [capture?]}]
   (if capture?
-    [[:char p] [:push (str p)]]
-    [[:char p]]))
+    [[:char ch] [:push (str ch)]]
+    [[:char ch]]))
 
-(defmethod compile :parka/string
-  [target {:keys [capture?]}]
+(defmethod compile* :parka/string
+  [{target :parka/string} {:keys [capture?]}]
   (let [core (mapv #(vector :char %) target)]
     (if capture?
       (into [] (concat [[:mark]] core [[:capture]]))
       core)))
 
-(defmethod compile :parka/any
+(defmethod compile* :parka/any
   [_ {:keys [capture?]}]
   (if capture?
     [[:mark] [:any] [:capture]]
     [[:any]]))
 
-#_(defn- append-seq-result [label caps value]
-  (let [old (get caps label)]
-    (cond
-      (nil?    old) (assoc caps label value)
-      (vector? old) (update caps label conj value)
-      :else         (assoc caps label [old value]))))
-
-#_(defn- compile-seq-item-cap
-  "Compiles a single item inside a seq, when capturing."
-  [p s]
-  (cond
-    ;; If it's a keyword, use the terminal name as the label.
-    (keyword? p) (let [compiled (compile p s)]
-                   (into (compile p s)
-                         [[:apply-capture-2 (partial append-seq-result p)]]))
-
-    ;; If it's a vector, it's just inlined with the same logic.
-    (vector? p)  (compile p (assoc s :nested? true))
-
-    ;; For a map with one value, take it as {label target}.
-    (and (map? p) (= 1 (count p)))
-    (let [[label inner] (first p)
-          compiled      (compile inner s)
-          f             (partial append-seq-result label)]
-      (into compiled [[:apply-capture-2 f]]))
-
-    ;; For any other parser, use the key :parka/matches
-    :else   (let [compiled     (compile p s)
-                  f            (partial append-seq-result :parka/matches)]
-              (into compiled [[:apply-capture-2 f]]))))
-
-#_(defn- compile-seq-item-drop
-  [p s]
-  (prn "CSID" p)
-  (if (and (map? p) (not (:parka/type p)))
-    (compile (first (vals p)) s)
-    (compile p s)))
-
-(defmethod compile :parka/seq
-  [ps {:keys [nested? capture?] :as s}]
+(defmethod compile* :parka/seq
+  [{ps :parka/seq} {:keys [nested? capture?] :as s}]
   ;; If nested, don't push a new value.
   (let [pre (when (and capture? (not nested?))
               [[:push []]])
@@ -99,11 +68,11 @@
                        [[:commit (inc (count rhs))]]
                        rhs)))))
 
-(defmethod compile :parka/alt
+(defmethod compile* :parka/alt
   [{:parka/keys [alts]} s]
   (compile-alt alts s))
 
-(defmethod compile :parka/not
+(defmethod compile* :parka/not
   [{:parka/keys [inner]} {:keys [capture?] :as s}]
   ; No need to really capture lookahead.
   (let [p (compile inner (assoc s :capture? false))]
@@ -113,7 +82,7 @@
                   [[:fail-twice]]
                   (when capture? [[:push nil]])))))
 
-(defmethod compile :parka/and
+(defmethod compile* :parka/and
   [{:parka/keys [inner]} {:keys [capture?] :as s}]
   ; No need to really capture lookahead.
   (let [p (compile inner (assoc s :capture? false))]
@@ -124,14 +93,14 @@
                   [[:back-commit 2]
                    [:fail]]))))
 
-(defmethod compile :parka/set
-  [chs {:keys [capture?]}]
+(defmethod compile* :parka/set
+  [{chs :parka/set} {:keys [capture?]}]
   (into [] (concat (when capture? [[:mark]])
                    [[:charset chs]]
                    (when capture? [[:capture]]))))
 
-(defmethod compile :parka/nonterminal
-  [nonterminal _]
+(defmethod compile* :parka/nonterminal
+  [{:parka/keys [nonterminal]} _]
   [[:open-call nonterminal]])
 
 (defn compile-grammar [[[sym pat] & rs] labels code s]
@@ -153,7 +122,7 @@
 (defn resolve-calls [code labels]
   (into [] (map-indexed #(resolve-call %2 %1 labels) code)))
 
-(defmethod compile :parka/grammar
+(defmethod compile* :parka/grammar
   [{:parka/keys [rules start]} s]
   (let [[labels code] (compile-grammar rules
                                        {:parka/top 0}
@@ -163,7 +132,7 @@
         labels'       (assoc labels :parka/end (count code))]
     (resolve-calls code labels')))
 
-(defmethod compile :parka/star
+(defmethod compile* :parka/star
   [{:parka/keys [inner]} {:keys [capture?] :as s}]
   (let [p (compile inner s)
         cap-width (if capture? 1 0)]
@@ -174,7 +143,7 @@
                   (when capture? [[:apply-capture-2 conj]])
                   [[:partial-commit (- (+ cap-width (count p)))]]))))
 
-(defmethod compile :parka/action
+(defmethod compile* :parka/action
   [{:parka/keys [inner action]} {:keys [capture?] :as s}]
   (into [] (concat (compile inner s)
                    (when capture? [[:apply-capture-1 action]]))))
