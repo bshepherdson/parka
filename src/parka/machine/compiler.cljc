@@ -99,6 +99,11 @@
                    [[:charset chs]]
                    (when capture? [[:capture]]))))
 
+(defmethod compile* :parka/label
+  [{:parka/keys [inner label]} s]
+  (cons [:label label]
+        (compile inner s)))
+
 (defmethod compile* :parka/nonterminal
   [{:parka/keys [nonterminal]} _]
   [[:open-call nonterminal]])
@@ -147,4 +152,3 @@
   [{:parka/keys [inner action]} {:keys [capture?] :as s}]
   (into [] (concat (compile inner s)
                    (when capture? [[:apply-capture-1 action]]))))
-

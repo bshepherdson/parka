@@ -11,6 +11,19 @@
 ;;; :pos   i
 ;;; :caps  []}
 
+; Stack types
+; - :choice {:pc, :pos, :caps)
+; - :return {:pc}
+
+(defn- pop-exp [s exp-type]
+  (let [t (-> s :stack peek :type)]
+    (when-not (= t exp-type)
+      (throw (ex-info (str "Bad stacking in parsing machine: popped"
+                           exp-type "not" t)
+                      {:expected exp-type
+                       :got      t})))
+    (update s :stack pop)))
+
 (defn- head [^clojure.lang.IPersistentMap m]
   (let [input ^String (.valAt m :input)
         pos   ^long   (.valAt m :pos)]
@@ -34,16 +47,17 @@
 
 
 (defn- fail
-  "Drain the stack until we find a `[pc' pos' caps']` pair; set these values."
+  "Drain the stack until we find a `:choice` record; restore those values."
   [m err]
   (let [tos (peek (:stack m))]
-    (if (nil? tos)
-      (abort m err) ; We've run out of stack - a failed parse.
-      (let [m' (update m :stack pop)]
-        (if (map? tos)
-          (let [{:keys [pc pos caps]} tos]
-            (assoc m' :pc pc :pos pos :caps caps))
-          (recur m' err))))))
+    (case (:type tos)
+      nil     (abort m err)
+      :choice (let [{:keys [pc pos caps]} tos]
+                (-> m
+                    (pop-exp :choice)
+                    (assoc :pc pc :pos pos :caps caps)))
+      :return (recur (pop-exp m :return) err)
+      :label  (recur (pop-exp m :label)  (:label m)))))
 
 (defmulti exec (fn [_ [op]] op))
 
@@ -62,7 +76,8 @@
   [{:keys [pos pc caps] :as m} [_ delta offset]]
   (-> m
       pc+
-      (update :stack conj {:pc   (+ pc delta)
+      (update :stack conj {:type :choice
+                           :pc   (+ pc delta)
                            :pos  (- pos (or offset 0))
                            :caps caps})))
 
@@ -71,45 +86,56 @@
   (pc+ m delta))
 
 (defmethod exec :call
-  [{:keys [pc pos] :as m} [_ delta]]
+  [{:keys [pc] :as m} [_ delta]]
   (-> m
       (pc+ delta)
-      (update :stack conj (inc pc))))
+      (update :stack conj {:type :return
+                           :pc   (inc pc)})))
+
+(defn- pop-labels-to [m target-type]
+  (let [tos (-> m :stack peek)
+        typ (:type tos)]
+    (if (= typ :label)
+      (recur (update m :stack pop) target-type)
+      [tos (pop-exp m target-type)])))
+
+(defmethod exec :label
+  [m [_ label]]
+  (update m :stack conj {:type  :label
+                         :label label}))
 
 (defmethod exec :return
-  [{:keys [stack] :as m} _]
-  (-> m
-      (assoc :pc (peek stack))
-      (update :stack pop)))
+  [m _]
+  (let [[{:keys [pc]} m'] (pop-labels-to m :return)]
+    (assoc m' :pc pc)))
 
 (defmethod exec :commit
   [m [_ delta]]
   (-> m
       (pc+ delta)
-      (update :stack pop)))
+      (pop-labels-to :choice)
+      second))
 
 (defmethod exec :partial-commit
-  ;; Semantics here are to update PC by delta, and make the TOS backtracking entry
-  ;; point to the current position.
+  ;; Semantics here are to update PC by delta, and make the TOS backtracking
+  ;; entry point to the current position.
   ;; `[pc0 pos0 [... [pc1 pos1]]] -> [pc0+delta pos0 [...[pc1 pos0]]]`
   [m [_ delta]]
-  (-> m
-      (pc+ delta)
-      (update :stack #(conj (pop %) (assoc (peek %)
-                                           :pos (:pos m)
-                                           :caps (:caps m))))))
+  (let [[tos {:keys [caps pos] :as m}] (pop-labels-to m :choice)]
+    (-> m
+        (pc+ delta)
+        (update :stack conj (assoc tos :pos pos :caps caps)))))
 
 (defmethod exec :back-commit
   ;; Moves PC by delta, pops a backtracking record from the stack, ignores its
   ;; PC but moves the input to its position. Uses its caps and captures, but
   ;; pushes an extra nil as the value of this rule.
   [m [_ delta]]
-  (let [tos (peek (:stack m))]
+  (let [[{:keys [caps pos]} m] (pop-labels-to m :choice)]
     (-> m
         (pc+ delta)
-        (update :stack pop)
-        (assoc :pos  (:pos tos)
-               :caps (conj (:caps tos) nil)))))
+        (assoc :pos  pos
+               :caps (conj caps nil)))))
 
 (defmethod exec :fail
   [m [_ err]]
@@ -125,9 +151,11 @@
 
 (defmethod exec :charset
   [m [_ chs]]
-  (if (chs (head m))
-    (-> m pos+ pc+)
-    (fail m (errs/failed-expect m chs))))
+  (if-let [ch (head m)]
+    (if (chs ch)
+      (-> m pos+ pc+)
+      (fail m (errs/failed-expect m chs)))
+    (fail m (errs/parse-error m "unexpected EOF"))))
 
 (defmethod exec :span
   ;; Span is a run of character-set values.
@@ -208,7 +236,10 @@
             :filename label
             :pos      0
             :caps     []}]
-    #_(prn (:pc m) (nth (:code m) (:pc m)) (:caps m))
+    #_(println (str (:pc m) " " (nth (:code m) (:pc m))
+                    "\n    " (:caps m)
+                    "\n    " (:input m)
+                    "\n    " (apply str (repeat (:pos m) \space)) "^"))
     (if (:done? m)
       m
       (recur (exec m (nth (:code m) (:pc m)))))))
