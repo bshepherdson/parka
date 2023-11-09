@@ -18,7 +18,7 @@
 
   Once you have constructured your complete expression, call `compile` with it.
   The returned engine can be run by calling `parse`."
-  (:refer-clojure :exclude [+ * and compile do drop let not str])
+  (:refer-clojure :exclude [+ * and compile do drop let not range str])
   (:require
     [clojure.core :as core]
     [clojure.string :as string]
@@ -34,6 +34,19 @@
   [& exprs]
   {:parka/type :parka/alt
    :parka/alts exprs})
+
+(defn alt-labels
+  "Like [[alt]], but the args are alternating human-readable labels and parsing
+  expressions. `(alt-labels \"abc\" :abc \"def\" :def)` is a shorthand for
+  `(alt (expecting :abc \"abc\") (expecting :def \"def\"))`."
+  [& args]
+  (when-not (even? (count args))
+    (-> "alt-labels expects (alt-labels label1 expr1 ...), but got %d args"
+        (format (count args))
+        (ex-info {:args args})
+        throw))
+  (apply alt (for [[label expr] (partition 2 args)]
+               (expecting expr label))))
 
 (defn action
   "Given an expression and a unary function, runs that action function over the
@@ -133,7 +146,20 @@
                second)
        (not expr)))
 
-;; TODO Add range, eg. (range \0 \9), (range \a \z)
+(defn range
+  "Parses any single character whose Unicode codepoint falls between `start` and
+  `end` inclusive."
+  [start end]
+  (core/let [start (int start)
+             end   (inc (int end))]
+    {:parka/type :parka/set
+     :parka/set  (set (map char (core/range start end)))}))
+
+(defn match
+  "Matches a single character that returns a truthy value for `pred`."
+  [pred]
+  {:parka/type :parka/set
+   :parka/set  pred})
 
 (defn expecting
   "Parses like `expr` but in case of failure, overrides the default description
@@ -173,6 +199,13 @@
                 (fn [[~@syms]]
                   ~@body)))))
 
+(defn until
+  "Matches 0 or more `expr`, until `end` matches. Consumes `end`!"
+  [expr end]
+  (let [parts (* (do (not end) expr))
+        _ end]
+    parts))
+
 (defn grammar
   "Given a map `rules` of `:label` to expression, and the `start` label, builds
   a grammar composed of many named expressions.
@@ -189,7 +222,12 @@
 
 (def eof
   "Matches end-of-file. Useful for ensuring the entire input is consumed."
-  (not any))
+  (expecting (not any) "EOF"))
+
+(defn fail
+  "Returns a parser that always fails, with the given error message."
+  [msg]
+  (expecting (not any) msg))
 
 ;;;; Top-level functions
 (defn compile [expr]
@@ -201,25 +239,25 @@
 
   The `engine` must be one compiled by `compile`.
 
-  Returns either `{:success \"string matched\"}` or `{:error ...}`."
+  Returns either `{:success \"string matched\"}` or `{:error ...}`.
+
+  The input must be fully consumed, or an error is returned."
   [engine source text]
-  (core/let [{:keys [error caps] :as res} (engine/run engine source text)]
-    (when (not= 1 (count caps))
+  (core/let [{:keys [error caps pos] :as res} (engine/run engine source text)]
+    (when (core/and (core/not error)
+                    (not= 1 (count caps)))
       (throw (ex-info "bad capture!" res)))
     (cond
-      (core/and
-        error (keyword? error)) {:error error}
-      error        {:error (update error :parka/loc errors/pretty-location)}
-      :else        {:success (peek caps)})))
+      (core/and error (keyword? error))
+      {:error error}
 
+      error
+      {:error (update error :parka/loc errors/pretty-location)}
 
-(comment
-  (parse (compile (let [_     \(
-                        inner any
-                        _     \)]
-                    (str inner)))
-         "<test>"
-         "(x)")
-  *e
-  )
+      #_#_(< pos (count text))
+      {:error {:parka/parse-error true
+               :parka/loc         (errors/pretty-location [source text pos])
+               :parka/tail        (subs text pos (min (count text)
+                                                      (core/+ pos 30)))}}
 
+      :else {:success (peek caps)})))

@@ -8,13 +8,18 @@
   (sut/parse (sut/compile p) "<test>" input))
 
 (defn- error
+  [l c base]
+  {:error (merge {:parka/parse-error true
+                  :parka/loc         (str "<test> line " l " col " c)}
+                 base)})
+
+(defn- error-msg
   [l c msg]
-  {:error {:parka/parse-error true
-           :parka/loc         (str "<test> line " l " col " c)
-           :parka/message     msg}})
+  (error l c {:parka/message msg}))
 
 (defn- expected [l c exps]
-  (assoc-in (error l c "failed expectation") [:error :parka/expectations] exps))
+  (assoc-in (error-msg l c "failed expectation")
+            [:error :parka/expectations] exps))
 
 (deftest test-lit
   (is (= {:success "foo"} (test-parse "foo" "foo")))
@@ -38,7 +43,7 @@
     (is (= {:success "a"} (test-parse p "a")))
     (is (= {:success "b"} (test-parse p "b")))
     (is (= {:success "c"} (test-parse p "c")))
-    (is (= (expected 1 0 #{\a \b \c})
+    (is (= (error 1 0 {:parka/message "unexpected EOF"})
            (test-parse p "")))
     (is (= (expected 1 0 #{\a \b \c})
            (test-parse p "d")))))
@@ -103,6 +108,17 @@
            (test-parse eofd "abbb")))
     (is (= {:error :parka.machine.peg/expected-failure}
            (test-parse eofd "abbbc")))))
+
+(deftest test-expecting
+  (is (= {:error #:parka{:parse-error true
+                         :loc "<test> line 1 col 0"
+                         :message "failed expectation"
+                         :expectations ["a"]}}
+         (test-parse "a" "b")))
+  (is (= {:error #:parka{:parse-error true
+                         :loc "<test> line 1 col 0"
+                         :message "better grades"}}
+         (test-parse (sut/expecting "a" "better grades") "b"))))
 
 #_(deftest test-span
   (let [p (sut/span \a \z)]

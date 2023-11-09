@@ -31,6 +31,11 @@
 (defn test-parse [s]
   (p/parse (p/compile (p/grammar math-rules :start)) "<test>" s))
 
+(comment
+  (p/compile (p/grammar math-rules :start))
+  (test-parse "-17")
+  )
+
 (deftest math-test
   (testing "just numbers"
     (is (= {:success 1}   (test-parse "1")))

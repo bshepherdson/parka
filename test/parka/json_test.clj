@@ -96,8 +96,7 @@
   (is (= 0.02     (test-parse-from :number "0.02")))
   (is (= 200.0    (test-parse-from :number "0.02e4")))
   (is (= 123.4e-2 (test-parse-from :number "123.4e-2")))
-  (is (= 0.12     (test-parse-from :number "12e-2")))
-  )
+  (is (= 0.12     (test-parse-from :number "12e-2"))))
 
 (deftest test-ws
   (is (= nil (test-parse-from :ws "   \t\t \n   \t"))))
