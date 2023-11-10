@@ -3,25 +3,15 @@
   instructions."
   (:refer-clojure :exclude [compile])
   (:require
-    [parka.errors :as errs]))
+   [parka.ast :as ast]
+   [parka.errors :as errs]))
 
 (defmulti compile*
   (fn [pat _]
     (:parka/type pat)))
 
-(defn- ->parser [pat]
-  (cond
-    (map?     pat) pat
-    (keyword? pat) {:parka/type        :parka/nonterminal
-                    :parka/nonterminal pat}
-    (char?    pat) {:parka/type :parka/char   :parka/char   pat}
-    (string?  pat) {:parka/type :parka/string :parka/string pat}
-    (vector?  pat) {:parka/type :parka/seq    :parka/seq    pat}
-    (set?     pat) {:parka/type :parka/set    :parka/set    pat}
-    :else (throw (ex-info "bad compile pattern" {:value pat}))))
-
 (defn compile [p s]
-  (compile* (->parser p) s))
+  (compile* (ast/->parser p) s))
 
 (defn compile-expr [p]
   (into (compile p {:capture? true}) [[:end]]))
@@ -147,4 +137,3 @@
   [{:parka/keys [inner action]} {:keys [capture?] :as s}]
   (into [] (concat (compile inner s)
                    (when capture? [[:apply-capture-1 action]]))))
-

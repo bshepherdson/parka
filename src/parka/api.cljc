@@ -22,6 +22,7 @@
   (:require
     [clojure.core :as core]
     [clojure.string :as string]
+    [parka.dynamic :as dynamic]
     [parka.errors :as errors]
     [parka.machine.compiler :as compiler]
     [parka.machine.peg :as engine])
@@ -35,7 +36,7 @@
   {:parka/type :parka/alt
    :parka/alts exprs})
 
-(defn alt-labels
+#_(defn alt-labels
   "Like [[alt]], but the args are alternating human-readable labels and parsing
   expressions. `(alt-labels \"abc\" :abc \"def\" :def)` is a shorthand for
   `(alt (expecting :abc \"abc\") (expecting :def \"def\"))`."
@@ -261,3 +262,22 @@
                                                       (core/+ pos 30)))}}
 
       :else {:success (peek caps)})))
+
+(defn parse-dynamic
+  "Given a parsing expression `expr`, `source` label (eg. a file name), and
+  input `text`, attempts to parse the input.
+
+  Returns either `{:success value :tail remaining-input-str}`
+  or `{:error #:parka{:parse-error true :loc location :tail input-tail}}`."
+  [expr source text]
+  (core/let [[res s value] (dynamic/parse-string expr source text)]
+    (case res
+      :success {:success value
+                :tail    (subs text (:pos s))}
+      :fail    (let [details @s]
+                 ;; TODO: Return a snippet around the error (to each side)
+                 {:error {:parka/parse-error  true
+                          :parka/loc          (:pos details) #_(pretty-location)
+                          :parka/expectations (dynamic/expectations details)}})
+      :error   (throw (ex-info (str "Bad input parser: " #_really-err-msg s)
+                               {:error s})))))
