@@ -7,7 +7,9 @@
 
 (defn pretty-location
   [[filename input pos]]
-  (let [prefix (subs input 0 pos)
+  (let [prefix (if (pos? pos)
+                 (subs input 0 pos)
+                 "")
         lines  (str/split-lines prefix)
         line   (count lines)
         col    (count (last lines))]

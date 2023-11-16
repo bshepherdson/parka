@@ -151,10 +151,12 @@
   "Parses any single character whose Unicode codepoint falls between `start` and
   `end` inclusive."
   [start end]
-  (core/let [start (int start)
-             end   (inc (int end))]
-    {:parka/type :parka/set
-     :parka/set  (set (map char (core/range start end)))}))
+  (core/let [exp   (core/str "[" start "-" end "]")
+             start (int start)
+             end   (inc (int end))
+             inner {:parka/type :parka/set
+                    :parka/set  (set (map char (core/range start end)))}]
+    (expecting inner exp)))
 
 (defn match
   "Matches a single character that returns a truthy value for `pred`."
@@ -270,14 +272,16 @@
   Returns either `{:success value :tail remaining-input-str}`
   or `{:error #:parka{:parse-error true :loc location :tail input-tail}}`."
   [expr source text]
-  (core/let [[res s value] (dynamic/parse-string expr source text)]
+  (core/let [[res s value :as result] (dynamic/parse-string expr source text)]
     (case res
-      :success {:success value
-                :tail    (subs text (:pos s))}
-      :fail    (let [details @s]
+      :success (merge {:success value}
+                      (when (< (:pos s) (count text))
+                        {:tail (subs text (:pos s))}))
+      :fail    (core/let [details @s]
                  ;; TODO: Return a snippet around the error (to each side)
                  {:error {:parka/parse-error  true
-                          :parka/loc          (:pos details) #_(pretty-location)
+                          :parka/loc (errors/pretty-location
+                                       [source text (:pos details)])
                           :parka/expectations (dynamic/expectations details)}})
       :error   (throw (ex-info (str "Bad input parser: " #_really-err-msg s)
                                {:error s})))))

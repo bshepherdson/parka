@@ -79,7 +79,7 @@
                   (constantly []))})
 
 (defn test-parse-from [sym input]
-  (let [result (p/parse (p/compile (p/grammar json-rules sym)) "<test>" input)]
+  (let [result (p/parse-dynamic (p/grammar json-rules sym) "<test>" input)]
     (if (contains? result :success) ; nil is a valid result!
       (:success result)
       result)))
@@ -158,13 +158,9 @@
                        "asdf" nil}]
          (test-parse "  [ 1  ,false,null , {  \"abc\"  :true, \"def\": \"yolo\", \"asdf\": null  }  ]  "))))
 
-
 (comment
   ; Running this JSON parser on the 7MB payload used by
   ; https://github.com/GoogleChromeLabs/json-parse-benchmark
   ; This times 100 runs.
   (time (test-parse (slurp "./inspector-json-payload.json")))
-  (time (test-parse (slurp "./pp.json")))
-
-  )
-
+  (time (test-parse (slurp "./pp.json"))))

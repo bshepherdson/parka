@@ -39,7 +39,7 @@
   nonterminal)
 
 (defmethod print-expr* :parka/grammar [{:parka/keys [rules start]}]
-  [:grammar start rules])
+  [:grammar start #_rules])
 
 (defmethod print-expr* :parka/action [{:parka/keys [action inner]}]
   [:action (print-expr inner) action])

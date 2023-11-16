@@ -5,7 +5,7 @@
 
 
 (defn- test-parse [p input]
-  (sut/parse (sut/compile p) "<test>" input))
+  (sut/parse-dynamic p "<test>" input))
 
 (defn- error
   [l c base]
@@ -18,12 +18,12 @@
   (error l c {:parka/message msg}))
 
 (defn- expected [l c exps]
-  (assoc-in (error-msg l c "failed expectation")
-            [:error :parka/expectations] exps))
+  (-> (error l c nil)
+      (assoc-in [:error :parka/expectations] exps)))
 
 (deftest test-lit
   (is (= {:success "foo"} (test-parse "foo" "foo")))
-  (is (= (expected 1 2 ["o"])
+  (is (= (expected 1 0 ["'foo'"])
          (test-parse "foo" "for"))))
 
 #_(deftest test-lit-ic
@@ -34,8 +34,9 @@
 
 (deftest test-sets
   (is (= {:success "f"} (test-parse #{\f} "f")))
-  (is (= {:success "f"} (test-parse #{\f} "fo")))
-  (is (= (expected 1 0 (into #{} "abc"))
+  (is (= {:success "f"
+          :tail    "o"} (test-parse #{\f} "fo")))
+  (is (= (expected 1 0 ["[abc]"])
          (test-parse #{\a \b \c} "f"))))
 
 (deftest test-one-of
@@ -43,22 +44,27 @@
     (is (= {:success "a"} (test-parse p "a")))
     (is (= {:success "b"} (test-parse p "b")))
     (is (= {:success "c"} (test-parse p "c")))
-    (is (= (error 1 0 {:parka/message "unexpected EOF"})
+    (is (= (expected 1 0 ["[abc]"])
            (test-parse p "")))
-    (is (= (expected 1 0 #{\a \b \c})
+    (is (= (expected 1 0 ["[abc]"])
            (test-parse p "d")))))
 
 (deftest test-star
   (let [p (sut/* \a)]
-    (is (= {:success ["a" "a" "a" "a"]} (test-parse p "aaaab_c")))
-    (is (= {:success ["a"]}             (test-parse p "ab_cX")))
-    (is (= {:success []}                (test-parse p "X")))))
+    (is (= {:success ["a" "a" "a" "a"]
+            :tail    "b_c"}            (test-parse p "aaaab_c")))
+    (is (= {:success ["a"]
+            :tail    "b_cX"}           (test-parse p "ab_cX")))
+    (is (= {:success []
+            :tail    "X"}              (test-parse p "X")))))
 
 (deftest test-plus
   (let [p (sut/+ \a)]
-    (is (= {:success ["a" "a" "a" "a"]} (test-parse (sut/+ \a) "aaaab_c")))
-    (is (= {:success ["a"]}             (test-parse p "ab_cX")))
-    (is (= (expected 1 0 ["a"])         (test-parse p "X")))))
+    (is (= {:success ["a" "a" "a" "a"]
+            :tail    "b_c"}            (test-parse p "aaaab_c")))
+    (is (= {:success ["a"]
+            :tail    "b_cX"}           (test-parse p "ab_cX")))
+    (is (= (expected 1 0 ["a"])        (test-parse p "X")))))
 
 (deftest test-alt
   (testing "basics"
@@ -66,7 +72,7 @@
       (is (= {:success "foo"} (test-parse p "foo")))
       (is (= {:success "bar"} (test-parse p "bar")))
       (is (= {:success "baz"} (test-parse p "baz")))
-      (is (= (expected 1 0 ["b"])
+      (is (= (expected 1 0 ["'foo'" "'bar'" "'baz'"])
              (test-parse p "asdf")))))
 
   (testing "backtracking sequences"
@@ -84,14 +90,15 @@
            (test-parse p "abbb")))
     (is (= {:success ["a" nil ["b" "b" "b" "b" "b"]]}
            (test-parse p "abbbbb")))
-    (is (= {:error :parka.machine.peg/expected-failure}
+    (is (= (expected 1 1 ["'bbb'"])
            (test-parse p "abb")))))
 
 (deftest test-not
   (let [p ["a" (sut/not "b") sut/any]]
-    (is (= {:success ["a" nil "c"]}
+    (is (= {:success ["a" nil "c"]
+            :tail    "d"}
            (test-parse p "acd")))
-    (is (= {:error :parka.machine.peg/expected-failure}
+    (is (= (expected 1 1 ["not 'b'"])
            (test-parse p "abd")))))
 
 (deftest test-?
@@ -102,32 +109,27 @@
 (deftest test-eof
   (let [base ["a" (sut/* \b)]
         eofd (conj base sut/eof)]
-    (is (= {:success ["a" ["b" "b" "b"]]}
+    (is (= {:success ["a" ["b" "b" "b"]]
+            :tail    "c"}
            (test-parse base "abbbc")))
     (is (= {:success ["a" ["b" "b" "b"] nil]}
            (test-parse eofd "abbb")))
-    (is (= {:error :parka.machine.peg/expected-failure}
+    (is (= (expected 1 4 ["EOF"])
            (test-parse eofd "abbbc")))))
 
 (deftest test-expecting
-  (is (= {:error #:parka{:parse-error true
-                         :loc "<test> line 1 col 0"
-                         :message "failed expectation"
-                         :expectations ["a"]}}
+  (is (= (expected 1 0 ["'a'"])
          (test-parse "a" "b")))
-  (is (= {:error #:parka{:parse-error true
-                         :loc "<test> line 1 col 0"
-                         :message "better grades"}}
+  (is (= (expected 1 0 ["better grades"])
          (test-parse (sut/expecting "a" "better grades") "b"))))
 
-#_(deftest test-span
-  (let [p (sut/span \a \z)]
-    (is (= \d (test-parse p "d")))
-    (is (= \a (test-parse p "a")))
-    (is (= \z (test-parse p "z")))
-    (is (thrown-with-msg?
-          Exception #"expected character in range a to z; found A"
-          (test-parse p "A")))))
+(deftest test-range
+  (let [p (sut/range \a \z)]
+    (is (= {:success "d"} (test-parse p "d")))
+    (is (= {:success "a"} (test-parse p "a")))
+    (is (= {:success "z"} (test-parse p "z")))
+    (is (= (expected 1 0 ["[a-z]"])
+           (test-parse p "A")))))
 
 #_(deftest test-many-min
   (let [p (sut/many-min 3 (sut/alt (sut/lit "_")
